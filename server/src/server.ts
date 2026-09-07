@@ -24,9 +24,12 @@ export interface PlayerRotation {
 
 export type AnimationName = "Idle" | "Walk" | "Run" | "Jump" | "RunJump";
 
+export type CharacterChoice = "isko" | "iska";
+
 export interface PlayerState {
   id: string;
   name: string;
+  character: CharacterChoice;
   position: PlayerPosition;
   rotation: PlayerRotation;
   animation: AnimationName;
@@ -65,6 +68,7 @@ io.on("connection", (socket: Socket) => {
   const newPlayer: PlayerState = {
     id: socket.id,
     name: `Player #${shortId}`,
+    character: "isko",
     position: { x: 0, y: 1, z: 0 },
     rotation: { y: 0 },
     animation: "Idle",
@@ -84,6 +88,25 @@ io.on("connection", (socket: Socket) => {
   // Notify other players
   socket.broadcast.emit("player:joined", newPlayer);
 
+  // Handle character & profile customization
+  socket.on(
+    "player:customize",
+    (data: { name?: string; character?: CharacterChoice }) => {
+      const existing = players.get(socket.id);
+      if (!existing) return;
+
+      if (data.name && typeof data.name === "string") {
+        existing.name = data.name.trim().slice(0, 20) || existing.name;
+      }
+
+      if (data.character === "isko" || data.character === "iska") {
+        existing.character = data.character;
+      }
+
+      io.emit("player:updated", existing);
+    }
+  );
+
   // Handle movement updates
   socket.on(
     "player:move",
@@ -91,6 +114,7 @@ io.on("connection", (socket: Socket) => {
       position: PlayerPosition;
       rotation?: PlayerRotation;
       animation?: AnimationName;
+      character?: CharacterChoice;
     }) => {
       const existing = players.get(socket.id);
       if (!existing) return;
@@ -111,6 +135,10 @@ io.on("connection", (socket: Socket) => {
 
       if (data.animation) {
         existing.animation = data.animation;
+      }
+
+      if (data.character === "isko" || data.character === "iska") {
+        existing.character = data.character;
       }
 
       // Broadcast movement to all other clients

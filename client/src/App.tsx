@@ -25,6 +25,8 @@ import * as THREE from "three";
 
 type AnimationName = "Idle" | "Walk" | "Run" | "Jump" | "RunJump";
 
+type CharacterChoice = "isko" | "iska";
+
 type PlayerRotation = {
   y: number;
 };
@@ -32,6 +34,7 @@ type PlayerRotation = {
 type PlayerState = {
   id: string;
   name?: string;
+  character?: CharacterChoice;
   position: { x: number; y: number; z: number };
   rotation?: PlayerRotation;
   animation?: AnimationName;
@@ -43,6 +46,7 @@ type MultiplayerSocket = Socket<
     players: (players: PlayerState[]) => void;
     "player:joined": (player: PlayerState) => void;
     "player:moved": (player: PlayerState) => void;
+    "player:updated": (player: PlayerState) => void;
     "player:left": (data: { id: string }) => void;
   },
   {
@@ -50,6 +54,11 @@ type MultiplayerSocket = Socket<
       position: PlayerState["position"];
       rotation?: PlayerRotation;
       animation?: AnimationName;
+      character?: CharacterChoice;
+    }) => void;
+    "player:customize": (data: {
+      name?: string;
+      character?: CharacterChoice;
     }) => void;
   }
 >;
@@ -101,76 +110,30 @@ function useKeyboard() {
 }
 
 // ============================================================
-// CHARACTER MODEL
+// CHARACTER MODELS (ISKO & ISKA)
 // ============================================================
 
-function CharacterModel({ animation }: { animation: AnimationName }) {
+function IskoModel({ animation }: { animation: AnimationName }) {
   const group = useRef<THREE.Group>(null);
-
   const { scene, animations } = useGLTF("/models/player.glb");
   const modelClone = useMemo(() => SkeletonUtils.clone(scene), [scene]);
-
   const { actions } = useAnimations(animations, group);
 
   useEffect(() => {
     if (!actions) return;
-
     const actionNames = Object.keys(actions);
+    if (actionNames.length === 0) return;
 
-    if (actionNames.length === 0) {
-      console.warn("player.glb does not contain animations.");
+    const lower = animation.toLowerCase();
+    const actionName =
+      actionNames.find((n) => n.toLowerCase() === lower) ||
+      actionNames.find((n) => n.toLowerCase().includes(lower)) ||
+      actionNames[0];
 
-      return;
-    }
-
-    const findAction = (name: string): THREE.AnimationAction | null => {
-      // ------------------------------------------------------
-      // Exact match
-      // ------------------------------------------------------
-
-      if (actions[name]) {
-        return actions[name];
-      }
-
-      // ------------------------------------------------------
-      // Case-insensitive match
-      // ------------------------------------------------------
-
-      const lowerName = name.toLowerCase();
-
-      const exact = actionNames.find(
-        (actionName) => actionName.toLowerCase() === lowerName,
-      );
-
-      if (exact) {
-        return actions[exact];
-      }
-
-      // ------------------------------------------------------
-      // Partial match
-      // ------------------------------------------------------
-
-      const partial = actionNames.find((actionName) =>
-        actionName.toLowerCase().includes(lowerName),
-      );
-
-      if (partial) {
-        return actions[partial];
-      }
-
-      return null;
-    };
-
-    const action = findAction(animation);
-
-    if (!action) {
-      console.warn(`Animation "${animation}" not found.`);
-
-      return;
-    }
+    const action = actionName ? actions[actionName] : null;
+    if (!action) return;
 
     action.reset().fadeIn(0.2).play();
-
     return () => {
       action.fadeOut(0.2);
     };
@@ -183,15 +146,63 @@ function CharacterModel({ animation }: { animation: AnimationName }) {
   );
 }
 
+function IskaModel({ animation }: { animation: AnimationName }) {
+  const group = useRef<THREE.Group>(null);
+  const { scene, animations } = useGLTF("/models/iska.glb");
+  const modelClone = useMemo(() => SkeletonUtils.clone(scene), [scene]);
+  const { actions } = useAnimations(animations, group);
+
+  useEffect(() => {
+    if (!actions) return;
+    const actionNames = Object.keys(actions);
+    if (actionNames.length === 0) return;
+
+    const lower = animation.toLowerCase();
+    const actionName =
+      actionNames.find((n) => n.toLowerCase() === lower) ||
+      actionNames.find((n) => n.toLowerCase().includes(lower)) ||
+      actionNames[0];
+
+    const action = actionName ? actions[actionName] : null;
+    if (!action) return;
+
+    action.reset().fadeIn(0.2).play();
+    return () => {
+      action.fadeOut(0.2);
+    };
+  }, [actions, animation]);
+
+  return (
+    <group ref={group}>
+      <primitive object={modelClone} scale={1} position={[0, -0.8, 0]} />
+    </group>
+  );
+}
+
+function CharacterModel({
+  animation,
+  character = "isko",
+}: {
+  animation: AnimationName;
+  character?: CharacterChoice;
+}) {
+  if (character === "iska") {
+    return <IskaModel animation={animation} />;
+  }
+  return <IskoModel animation={animation} />;
+}
+
 // ============================================================
 // PLAYER
 // ============================================================
 
 function Player({
   ecctrl,
+  character = "isko",
   onAnimationChange,
 }: {
   ecctrl: React.RefObject<EcctrlHandle | null>;
+  character?: CharacterChoice;
   onAnimationChange?: (animation: AnimationName) => void;
 }) {
   const keys = useKeyboard();
@@ -497,6 +508,7 @@ function Player({
     >
       <CharacterModel
         animation={animation}
+        character={character}
       />
     </Ecctrl>
   );
@@ -785,17 +797,22 @@ function RemotePlayer({ player }: { player: PlayerState }) {
     group.current.rotation.y += diff * posLerp;
   });
 
+  const charType = player.character || "isko";
+
   return (
     <group
       ref={group}
       position={[player.position.x, player.position.y, player.position.z]}
     >
-      <CharacterModel animation={player.animation || "Idle"} />
+      <CharacterModel
+        animation={player.animation || "Idle"}
+        character={charType}
+      />
 
       <Html position={[0, 1.4, 0]} center distanceFactor={12}>
-        <div className="player-badge">
+        <div className={`player-badge player-badge-${charType}`}>
           <span className="player-badge-dot" />
-          <span>{player.name || `Player #${player.id.slice(0, 4)}`}</span>
+          <span>{player.name || `${charType === "iska" ? "Iska" : "Isko"} #${player.id.slice(0, 4)}`}</span>
         </div>
       </Html>
     </group>
@@ -817,16 +834,19 @@ function RemotePlayers({
 function MultiplayerSync({
   socket,
   ecctrl,
+  character,
   currentAnimation,
 }: {
   socket: MultiplayerSocket | null;
   ecctrl: React.RefObject<EcctrlHandle | null>;
+  character: CharacterChoice;
   currentAnimation: React.RefObject<AnimationName>;
 }) {
   const lastSentAt = useRef(0);
   const lastPos = useRef(new THREE.Vector3());
   const lastRotY = useRef<number>(0);
   const lastAnim = useRef<AnimationName>("Idle");
+  const lastChar = useRef<CharacterChoice>(character);
 
   useFrame((_, delta) => {
     if (!socket?.connected || !ecctrl.current) return;
@@ -845,17 +865,20 @@ function MultiplayerSync({
     const distMoved = position.distanceTo(lastPos.current);
     const rotDiff = Math.abs(rotY - lastRotY.current);
     const animChanged = anim !== lastAnim.current;
+    const charChanged = character !== lastChar.current;
 
     if (
       distMoved > 0.005 ||
       rotDiff > 0.015 ||
       animChanged ||
+      charChanged ||
       lastSentAt.current >= 500
     ) {
       lastSentAt.current = 0;
       lastPos.current.copy(position);
       lastRotY.current = rotY;
       lastAnim.current = anim;
+      lastChar.current = character;
 
       socket.emit("player:move", {
         position: {
@@ -867,6 +890,7 @@ function MultiplayerSync({
           y: Number(rotY.toFixed(3)),
         },
         animation: anim,
+        character: character,
       });
     }
   });
@@ -1080,6 +1104,13 @@ function useMultiplayer() {
         return next;
       });
     });
+    socket.on("player:updated", (player) => {
+      setPlayers((current) => {
+        const next = new Map(current);
+        next.set(player.id, player);
+        return next;
+      });
+    });
     socket.on("player:left", ({ id }) => {
       setPlayers((current) => {
         const next = new Map(current);
@@ -1094,13 +1125,127 @@ function useMultiplayer() {
     };
   }, []);
 
-  return { connected, ownId, players, socketRef };
+  const customizePlayer = (name: string, character: CharacterChoice) => {
+    socketRef.current?.emit("player:customize", { name, character });
+  };
+
+  return { connected, ownId, players, socketRef, customizePlayer };
+}
+
+// ============================================================
+// CHARACTER SELECT MODAL
+// ============================================================
+
+function CharacterSelectModal({
+  isOpen,
+  initialCharacter,
+  initialName,
+  onConfirm,
+}: {
+  isOpen: boolean;
+  initialCharacter: CharacterChoice;
+  initialName: string;
+  onConfirm: (character: CharacterChoice, name: string) => void;
+}) {
+  const [selected, setSelected] = useState<CharacterChoice>(initialCharacter);
+  const [name, setName] = useState(initialName);
+
+  useEffect(() => {
+    setSelected(initialCharacter);
+    setName(initialName);
+  }, [initialCharacter, initialName, isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="char-modal-backdrop">
+      <div className="char-modal-box">
+        <div>
+          <h2 className="char-modal-title">Welcome to Iskolia</h2>
+          <p className="char-modal-subtitle">Choose your character to enter campus</p>
+        </div>
+
+        <div className="char-cards-container">
+          <div
+            className={`char-card ${selected === "isko" ? "selected-isko" : ""}`}
+            onClick={() => setSelected("isko")}
+          >
+            <div className="char-avatar-icon char-avatar-isko">👦</div>
+            <span className="char-name">Isko</span>
+            <span className="char-tag char-tag-isko">Male Student</span>
+          </div>
+
+          <div
+            className={`char-card ${selected === "iska" ? "selected-iska" : ""}`}
+            onClick={() => setSelected("iska")}
+          >
+            <div className="char-avatar-icon char-avatar-iska">👧</div>
+            <span className="char-name">Iska</span>
+            <span className="char-tag char-tag-iska">Female Student</span>
+          </div>
+        </div>
+
+        <div className="char-input-group">
+          <label className="char-input-label">Display Name</label>
+          <input
+            type="text"
+            maxLength={18}
+            className="char-name-input"
+            placeholder="Enter your name..."
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+
+        <button
+          type="button"
+          className="btn-enter-world"
+          onClick={() =>
+            onConfirm(
+              selected,
+              name.trim() || (selected === "iska" ? "Iska" : "Isko"),
+            )
+          }
+        >
+          Enter Campus 🚀
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
   const ecctrl = useRef<EcctrlHandle>(null);
   const currentAnimation = useRef<AnimationName>("Idle");
   const multiplayer = useMultiplayer();
+
+  const [character, setCharacter] = useState<CharacterChoice>(() => {
+    const saved = localStorage.getItem("iskolia_character");
+    return saved === "iska" ? "iska" : "isko";
+  });
+
+  const [playerName, setPlayerName] = useState<string>(() => {
+    return localStorage.getItem("iskolia_player_name") || "Isko";
+  });
+
+  const [hasStarted, setHasStarted] = useState<boolean>(() => {
+    return localStorage.getItem("iskolia_has_started") === "true";
+  });
+
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(!hasStarted);
+
+  const handleSelectCharacter = (chosen: CharacterChoice, name: string) => {
+    setCharacter(chosen);
+    setPlayerName(name);
+    setHasStarted(true);
+    setIsModalOpen(false);
+
+    localStorage.setItem("iskolia_character", chosen);
+    localStorage.setItem("iskolia_player_name", name);
+    localStorage.setItem("iskolia_has_started", "true");
+
+    multiplayer.customizePlayer(name, chosen);
+  };
 
   return (
     <div
@@ -1140,6 +1285,7 @@ export default function App() {
 
           <Player
             ecctrl={ecctrl}
+            character={character}
             onAnimationChange={(anim) => {
               currentAnimation.current = anim;
             }}
@@ -1148,6 +1294,7 @@ export default function App() {
           <MultiplayerSync
             socket={multiplayer.socketRef.current}
             ecctrl={ecctrl}
+            character={character}
             currentAnimation={currentAnimation}
           />
 
@@ -1166,14 +1313,43 @@ export default function App() {
         </Physics>
       </Canvas>
 
-      <div className="online-indicator" aria-live="polite">
-        <span className={multiplayer.connected ? "online-dot" : "offline-dot"} />
-        <span>
-          {multiplayer.connected
-            ? `${multiplayer.players.size} online`
-            : "Offline"}
-        </span>
+      {/* =====================================================
+          TOP HUD
+          ===================================================== */}
+
+      <div className="hud-top-bar">
+        <button
+          type="button"
+          className="hud-btn"
+          onClick={() => setIsModalOpen(true)}
+          title="Change your character"
+        >
+          <span>{character === "iska" ? "👧 Iska" : "👦 Isko"}</span>
+          <span style={{ opacity: 0.6, fontSize: 11 }}>⇄</span>
+        </button>
+
+        <div className="online-indicator" aria-live="polite">
+          <span
+            className={multiplayer.connected ? "online-dot" : "offline-dot"}
+          />
+          <span>
+            {multiplayer.connected
+              ? `${multiplayer.players.size} online`
+              : "Offline"}
+          </span>
+        </div>
       </div>
+
+      {/* =====================================================
+          START / CHARACTER SELECT MODAL
+          ===================================================== */}
+
+      <CharacterSelectModal
+        isOpen={isModalOpen}
+        initialCharacter={character}
+        initialName={playerName}
+        onConfirm={handleSelectCharacter}
+      />
 
       {/* =====================================================
           MOBILE UI
@@ -1189,4 +1365,6 @@ export default function App() {
 // ============================================================
 
 useGLTF.preload("/models/player.glb");
+useGLTF.preload("/models/iska.glb");
 useGLTF.preload("/models/character.glb");
+
