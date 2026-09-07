@@ -146,6 +146,59 @@ select {
   transform: translateY(0);
 }
 
+.char-switch-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 15px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.88) 0%, rgba(30, 41, 59, 0.88) 100%);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.char-switch-btn:hover {
+  transform: translateY(-2px) scale(1.03);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+
+.char-switch-btn.is-iska {
+  border-color: rgba(244, 114, 182, 0.6);
+  box-shadow: 0 4px 18px rgba(244, 114, 182, 0.3);
+}
+
+.char-switch-btn.is-iska:hover {
+  background: linear-gradient(135deg, rgba(219, 39, 119, 0.25) 0%, rgba(30, 41, 59, 0.95) 100%);
+}
+
+.char-switch-btn.is-isko {
+  border-color: rgba(56, 189, 248, 0.6);
+  box-shadow: 0 4px 18px rgba(56, 189, 248, 0.3);
+}
+
+.char-switch-btn.is-isko:hover {
+  background: linear-gradient(135deg, rgba(2, 132, 199, 0.25) 0%, rgba(30, 41, 59, 0.95) 100%);
+}
+
+.kbd-badge {
+  font-size: 10px;
+  font-family: monospace;
+  background: rgba(255, 255, 255, 0.16);
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+
 /* ============================================================
    CHARACTER SELECTION MODAL
    ============================================================ */

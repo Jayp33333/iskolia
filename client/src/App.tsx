@@ -174,7 +174,7 @@ function IskaModel({ animation }: { animation: AnimationName }) {
 
   return (
     <group ref={group}>
-      <primitive object={modelClone} scale={1} position={[0, -0.8, 0]} />
+      <primitive object={modelClone} scale={1.45} position={[0, -0.8, 0]} />
     </group>
   );
 }
@@ -1247,6 +1247,38 @@ export default function App() {
     multiplayer.customizePlayer(name, chosen);
   };
 
+  const handleQuickSwitch = () => {
+    const nextChar: CharacterChoice = character === "isko" ? "iska" : "isko";
+    let nextName = playerName;
+    if (playerName === "Isko" && nextChar === "iska") nextName = "Iska";
+    if (playerName === "Iska" && nextChar === "isko") nextName = "Isko";
+
+    setCharacter(nextChar);
+    setPlayerName(nextName);
+    localStorage.setItem("iskolia_character", nextChar);
+    localStorage.setItem("iskolia_player_name", nextName);
+
+    multiplayer.customizePlayer(nextName, nextChar);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        isModalOpen
+      ) {
+        return;
+      }
+      if (e.key.toLowerCase() === "c") {
+        handleQuickSwitch();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [character, playerName, isModalOpen]);
+
   return (
     <div
       style={{
@@ -1320,12 +1352,21 @@ export default function App() {
       <div className="hud-top-bar">
         <button
           type="button"
+          className={`char-switch-btn ${character === "isko" ? "is-iska" : "is-isko"}`}
+          onClick={handleQuickSwitch}
+          title={`Switch character to ${character === "isko" ? "Iska" : "Isko"} (Press C)`}
+        >
+          <span>{character === "isko" ? "👧 Switch to Iska" : "👦 Switch to Isko"}</span>
+          <span className="kbd-badge">C</span>
+        </button>
+
+        <button
+          type="button"
           className="hud-btn"
           onClick={() => setIsModalOpen(true)}
-          title="Change your character"
+          title="Edit Name / Choose Character"
         >
-          <span>{character === "iska" ? "👧 Iska" : "👦 Isko"}</span>
-          <span style={{ opacity: 0.6, fontSize: 11 }}>⇄</span>
+          <span>⚙️</span>
         </button>
 
         <div className="online-indicator" aria-live="polite">
