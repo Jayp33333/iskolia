@@ -210,7 +210,7 @@ function IskaModel({ animation }: { animation: AnimationName }) {
 
   return (
     <group ref={group}>
-      <primitive object={modelClone} scale={1.45} position={[0, -0.8, 0]} />
+      <primitive object={modelClone} scale={1.5} position={[0, -0.8, 0]} />
     </group>
   );
 }
@@ -570,9 +570,8 @@ function Player({
         character={character}
       />
 
-      <Html position={[0, 1.4, 0]} center distanceFactor={12}>
+      <Html position={[0, 2.5, 0]} center distanceFactor={12} zIndexRange={[1, 0]}>
         <div className={`player-badge player-badge-${character}`}>
-          <span className="player-badge-dot" />
           <span className="player-badge-name">{name}</span>
         </div>
       </Html>
@@ -641,9 +640,8 @@ function RemotePlayer({
         character={charType}
       />
 
-      <Html position={[0, 1.4, 0]} center distanceFactor={12}>
+      <Html position={[0, 2.5, 0]} center distanceFactor={12} zIndexRange={[1, 0]}>
         <div className={`player-badge player-badge-${charType}`}>
-          <span className="player-badge-dot" />
           <span className="player-badge-name">{player.name || `${charType === "iska" ? "Iska" : "Isko"} #${player.id.slice(0, 4)}`}</span>
         </div>
       </Html>
@@ -1521,7 +1519,20 @@ function StartIntroScreen({
       <div className="start-intro-card">
         <div className="start-intro-header">
           <div className="start-intro-badge">
-            <span className="badge-sparkle">✨</span>
+            <svg
+              className="badge-icon"
+              viewBox="0 0 24 24"
+              width="13"
+              height="13"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
             <span>ISKOLIA 3D CAMPUS</span>
           </div>
           <h1 className="start-intro-title">Welcome to Campus</h1>
@@ -1537,7 +1548,12 @@ function StartIntroScreen({
             className={`char-card ${character === "isko" ? "selected-isko" : ""}`}
             onClick={() => onSelectCharacter("isko")}
           >
-            <div className="char-avatar-icon char-avatar-isko">👦</div>
+            <div className="char-avatar-icon char-avatar-isko" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="8" r="3.5" />
+                <path d="M4.5 20c.8-3.5 3.5-5.5 7.5-5.5s6.7 2 7.5 5.5" />
+              </svg>
+            </div>
             <span className="char-name">Isko</span>
             <span className="char-tag char-tag-isko">Male Student</span>
           </button>
@@ -1547,7 +1563,13 @@ function StartIntroScreen({
             className={`char-card ${character === "iska" ? "selected-iska" : ""}`}
             onClick={() => onSelectCharacter("iska")}
           >
-            <div className="char-avatar-icon char-avatar-iska">👧</div>
+            <div className="char-avatar-icon char-avatar-iska" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="8" r="3.5" />
+                <path d="M4.5 20c.8-3.5 3.5-5.5 7.5-5.5s6.7 2 7.5 5.5" />
+                <path d="M8.5 5.5c.7-1.4 2-2.2 3.5-2.2s2.8.8 3.5 2.2" />
+              </svg>
+            </div>
             <span className="char-name">Iska</span>
             <span className="char-tag char-tag-iska">Female Student</span>
           </button>
@@ -1580,10 +1602,32 @@ function StartIntroScreen({
             </span>
           </div>
           <div className="start-controls-hints">
-            <span>⌨️ WASD Move</span>
-            <span>⚡ Shift Sprint</span>
-            <span>🦘 Space Jump</span>
-            <span>💬 Enter Chat</span>
+            <span className="control-hint">
+              <svg className="control-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <path d="M6 9h.01M9 9h.01M12 9h.01M15 9h.01M18 9h.01M6 13h.01M9 13h6M18 13h.01" />
+              </svg>
+              WASD Move
+            </span>
+            <span className="control-hint">
+              <svg className="control-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m13 2-9 12h7l-1 8 9-12h-7l1-8z" />
+              </svg>
+              Shift Sprint
+            </span>
+            <span className="control-hint">
+              <svg className="control-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 19V5M6 11l6-6 6 6" />
+                <path d="M5 21h14" />
+              </svg>
+              Space Jump
+            </span>
+            <span className="control-hint">
+              <svg className="control-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              Enter Chat
+            </span>
           </div>
         </div>
 
@@ -1593,7 +1637,11 @@ function StartIntroScreen({
           className="btn-enter-world btn-enter-campus-glow"
           onClick={onEnter}
         >
-          Enter Campus 🚀
+          <span>Enter Campus</span>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M5 12h13" />
+            <path d="m13 6 6 6-6 6" />
+          </svg>
         </button>
       </div>
 
@@ -1879,19 +1927,42 @@ function ChatBox({
   onSendMessage,
   ownId,
   playerName,
+  onlineCount,
+  isConnected,
 }: {
   messages: ChatMessage[];
   onSendMessage: (text: string) => void;
   ownId: string | null;
   playerName?: string;
+  onlineCount: number;
+  isConnected: boolean;
 }) {
   const [inputVal, setInputVal] = useState("");
-  const [isOpen, setIsOpen] = useState(true);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Track unread messages when chat is collapsed
+  const [seenCount, setSeenCount] = useState(messages.length);
+  const unread = Math.max(0, messages.filter((m) => !m.isSystem).length - seenCount);
+
+  // Mark all as read when opening
+  const handleToggle = () => {
+    const next = !isOpen;
+    setIsOpen(next);
+    if (next) {
+      setSeenCount(messages.filter((m) => !m.isSystem).length);
+    }
+  };
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
+    if (isOpen) {
+      setSeenCount(messages.filter((m) => !m.isSystem).length);
+    }
   }, [messages, isOpen]);
 
   // Live timer for updating relative time ("19s ago")
@@ -1907,6 +1978,7 @@ function ChatBox({
         if (document.activeElement !== inputRef.current) {
           e.preventDefault();
           setIsOpen(true);
+          setSeenCount(messages.filter((m) => !m.isSystem).length);
           setTimeout(() => inputRef.current?.focus(), 50);
         }
       } else if (e.key === "Escape") {
@@ -1915,7 +1987,7 @@ function ChatBox({
     };
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, []);
+  }, [messages]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1926,15 +1998,15 @@ function ChatBox({
 
   return (
     <div className={`chat-box-container ${isOpen ? "open" : "collapsed"}`}>
-      <div className="chat-box-header" onClick={() => setIsOpen(!isOpen)}>
+      <div className="chat-box-header" onClick={handleToggle}>
         <div className="chat-box-title">
           <svg
             className="chat-bubble-count-icon"
             viewBox="0 0 24 24"
-            width="14"
-            height="14"
+            width={isOpen ? 14 : 20}
+            height={isOpen ? 14 : 20}
             fill="none"
-            stroke="currentColor"
+            stroke={isOpen ? "currentColor" : "#71717a"}
             strokeWidth="1.8"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -1942,23 +2014,33 @@ function ChatBox({
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
           <span>{messages.length} messages</span>
+          {/* Badge — only visible when collapsed due to CSS, positioned absolutely */}
+          {unread > 0 && (
+            <span className="chat-msg-badge">
+              {unread > 99 ? "99+" : unread}
+            </span>
+          )}
+        </div>
+        <div className="online-indicator chat-online-indicator" aria-live="polite">
+          <span className={isConnected ? "online-dot" : "offline-dot"} />
+          <span>{isConnected ? `${onlineCount} online` : "offline"}</span>
         </div>
         <button
           type="button"
           className="chat-box-toggle-btn"
           onClick={(e) => {
             e.stopPropagation();
-            setIsOpen(!isOpen);
+            handleToggle();
           }}
-          title={isOpen ? "Minimize chat" : "Expand chat"}
+          title="Minimize chat"
         >
-          {isOpen ? "−" : "+"}
+          −
         </button>
       </div>
 
       {isOpen && (
         <>
-          <div className="chat-box-messages">
+          <div ref={messagesContainerRef} className="chat-box-messages">
             {messages.length === 0 ? (
               <div className="chat-empty-hint">
                 say something... press Enter to start chatting
@@ -1968,7 +2050,7 @@ function ChatBox({
                 if (msg.isSystem) {
                   return (
                     <div key={msg.id} className="chat-msg-system">
-                      <span className="chat-sys-icon">⚡</span>
+
                       <span>{msg.text}</span>
                     </div>
                   );
@@ -2024,7 +2106,6 @@ function ChatBox({
                 );
               })
             )}
-            <div ref={messagesEndRef} />
           </div>
 
           <div className="chat-footer-area">
@@ -2072,6 +2153,51 @@ export default function App() {
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("intro");
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
+  const [playerNotice, setPlayerNotice] = useState<string | null>(null);
+  const previousPlayersRef = useRef<Map<string, PlayerState> | null>(null);
+  const playerNoticeTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const previousPlayers = previousPlayersRef.current;
+    const currentPlayers = multiplayer.players;
+    previousPlayersRef.current = new Map(currentPlayers);
+
+    if (!previousPlayers || (previousPlayers.size === 0 && currentPlayers.size > 0)) {
+      return;
+    } 
+
+    const joinedPlayer = Array.from(currentPlayers.values()).find(
+      (player) => !previousPlayers.has(player.id),
+    );
+    const leftPlayer = Array.from(previousPlayers.values()).find(
+      (player) => !currentPlayers.has(player.id),
+    );
+    const changedPlayer = joinedPlayer || leftPlayer;
+
+    if (!changedPlayer) return;
+
+    setPlayerNotice(
+      joinedPlayer
+        ? `${joinedPlayer.name || "A player"} joined the campus`
+        : `${leftPlayer?.name || "A player"} left the campus`,
+    );
+
+    if (playerNoticeTimeoutRef.current !== null) {
+      window.clearTimeout(playerNoticeTimeoutRef.current);
+    }
+    playerNoticeTimeoutRef.current = window.setTimeout(
+      () => setPlayerNotice(null),
+      3500,
+    );
+  }, [multiplayer.players]);
+
+  useEffect(() => {
+    return () => {
+      if (playerNoticeTimeoutRef.current !== null) {
+        window.clearTimeout(playerNoticeTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Auto-detect real device location on load (Geolocation API with IP fallback)
   useEffect(() => {
@@ -2232,6 +2358,12 @@ export default function App() {
         </Physics>
       </Canvas>
 
+      {gamePhase === "playing" && playerNotice && (
+        <div className="player-activity-notice" role="status" aria-live="polite">
+          {playerNotice}
+        </div>
+      )}
+
       {/* =====================================================
           PHASE 1: STARTING INTRO SCREEN
           ===================================================== */}
@@ -2266,27 +2398,28 @@ export default function App() {
       {gamePhase === "playing" && (
         <>
           <div className="hud-top-bar">
-            {/* RETURN TO ORBIT VIEW BUTTON */}
+            {/* RETURN TO HOME / ORBIT VIEW BUTTON */}
             <button
               type="button"
               className="hud-orbit-btn"
               onClick={handleReturnToOrbit}
               title="Return to Orbit View / Campus Tour"
             >
-              <span>🎥</span>
-              <span>Orbit View</span>
+              <svg
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <polyline points="9 22 9 12 15 12 15 22" />
+              </svg>
             </button>
 
-            {/* QUICK SWITCH CHARACTER BUTTON */}
-            <button
-              type="button"
-              className={`char-switch-btn ${character === "isko" ? "is-iska" : "is-isko"}`}
-              onClick={handleQuickSwitch}
-              title={`Switch character to ${character === "isko" ? "Iska" : "Isko"} (Press C)`}
-            >
-              <span>{character === "isko" ? "👧 Switch to Iska" : "👦 Switch to Isko"}</span>
-              <span className="kbd-badge">C</span>
-            </button>
 
             {/* EDIT PROFILE BUTTON */}
             <button
@@ -2295,20 +2428,21 @@ export default function App() {
               onClick={() => setIsEditModalOpen(true)}
               title="Edit Profile"
             >
-              <span>⚙️</span>
+              <svg
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="8" r="3.5" />
+                <path d="M4.5 20c.8-3.5 3.5-5.5 7.5-5.5s6.7 2 7.5 5.5" />
+              </svg>
             </button>
 
-            {/* ONLINE BADGE */}
-            <div className="online-indicator" aria-live="polite">
-              <span
-                className={multiplayer.connected ? "online-dot" : "offline-dot"}
-              />
-              <span>
-                {multiplayer.connected
-                  ? `${multiplayer.players.size} online`
-                  : "Offline"}
-              </span>
-            </div>
           </div>
 
           {/* CAMPUS CHAT BOX */}
@@ -2317,6 +2451,8 @@ export default function App() {
             onSendMessage={multiplayer.sendMessage}
             ownId={multiplayer.ownId}
             playerName={playerName}
+            onlineCount={multiplayer.players.size}
+            isConnected={multiplayer.connected}
           />
 
           {/* MOBILE JOYSTICK & BUTTONS */}
