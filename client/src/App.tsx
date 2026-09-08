@@ -54,6 +54,8 @@ type ChatMessage = {
   text: string;
   timestamp: number;
   isSystem?: boolean;
+  recipientId?: string;
+  isPrivate?: boolean;
 };
 
 type MultiplayerSocket = Socket<
@@ -82,7 +84,7 @@ type MultiplayerSocket = Socket<
       location?: string;
       device?: DeviceType;
     }) => void;
-    "chat:send": (data: { text: string; device?: DeviceType }) => void;
+    "chat:send": (data: { text: string; device?: DeviceType; recipientId?: string }) => void;
   }
 >;
 
@@ -1472,10 +1474,11 @@ function useMultiplayer() {
     });
   };
 
-  const sendMessage = (text: string) => {
+  const sendMessage = (text: string, recipientId?: string) => {
     socketRef.current?.emit("chat:send", {
       text,
       device: getDeviceType(),
+      recipientId,
     });
   };
 
@@ -1929,29 +1932,71 @@ function ChatBox({
   playerName,
   onlineCount,
   isConnected,
+  players,
 }: {
   messages: ChatMessage[];
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, recipientId?: string) => void;
   ownId: string | null;
   playerName?: string;
   onlineCount: number;
   isConnected: boolean;
+  players: Map<string, PlayerState>;
 }) {
   const [inputVal, setInputVal] = useState("");
   const [isOpen, setIsOpen] = useState(false);
+  const [showPlayers, setShowPlayers] = useState(false);
+  const [privateRecipient, setPrivateRecipient] = useState<PlayerState | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Track unread messages when chat is collapsed
-  const [seenCount, setSeenCount] = useState(messages.length);
-  const unread = Math.max(0, messages.filter((m) => !m.isSystem).length - seenCount);
+  const publicMessageCount = messages.filter(
+    (message) => !message.isSystem && !message.isPrivate,
+  ).length;
+  const privateMessages = messages.filter(
+    (message) => !message.isSystem && message.isPrivate,
+  );
+  const [seenPublicCount, setSeenPublicCount] = useState(publicMessageCount);
+  const [seenPrivateMessageIds, setSeenPrivateMessageIds] = useState(
+    () => new Set(privateMessages.map((message) => message.id)),
+  );
+  const unreadPrivateMessages = privateMessages.filter(
+    (message) =>
+      !seenPrivateMessageIds.has(message.id) && message.senderId !== ownId,
+  );
+  const unread =
+    Math.max(0, publicMessageCount - seenPublicCount) +
+    unreadPrivateMessages.length;
+  const publicUnread = Math.max(0, publicMessageCount - seenPublicCount);
+  const privateUnread = unreadPrivateMessages.length;
+
+  const markActiveChatAsRead = () => {
+    if (privateRecipient) {
+      setSeenPrivateMessageIds((current) => {
+        const next = new Set(current);
+        privateMessages.forEach((message) => {
+          if (
+            message.senderId === privateRecipient.id ||
+            message.recipientId === privateRecipient.id
+          ) {
+            next.add(message.id);
+          }
+        });
+        return next;
+      });
+    } else {
+      setSeenPublicCount(publicMessageCount);
+    }
+  };
 
   // Mark all as read when opening
   const handleToggle = () => {
     const next = !isOpen;
     setIsOpen(next);
+    if (!next) {
+      setShowPlayers(false);
+    }
     if (next) {
-      setSeenCount(messages.filter((m) => !m.isSystem).length);
+      markActiveChatAsRead();
     }
   };
 
@@ -1960,10 +2005,8 @@ function ChatBox({
     if (container) {
       container.scrollTop = container.scrollHeight;
     }
-    if (isOpen) {
-      setSeenCount(messages.filter((m) => !m.isSystem).length);
-    }
-  }, [messages, isOpen]);
+    if (isOpen) markActiveChatAsRead();
+  }, [messages, isOpen, privateRecipient]);
 
   // Live timer for updating relative time ("19s ago")
   const [now, setNow] = useState(() => Date.now());
@@ -1978,7 +2021,7 @@ function ChatBox({
         if (document.activeElement !== inputRef.current) {
           e.preventDefault();
           setIsOpen(true);
-          setSeenCount(messages.filter((m) => !m.isSystem).length);
+          markActiveChatAsRead();
           setTimeout(() => inputRef.current?.focus(), 50);
         }
       } else if (e.key === "Escape") {
@@ -1987,14 +2030,26 @@ function ChatBox({
     };
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, [messages]);
+  }, [messages, privateRecipient]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputVal.trim()) return;
-    onSendMessage(inputVal.trim());
+    onSendMessage(inputVal.trim(), privateRecipient?.id);
     setInputVal("");
   };
+
+  const otherPlayers = Array.from(players.values()).filter(
+    (player) => player.id !== ownId,
+  );
+  const visibleMessages = messages.filter((message) => {
+    if (!privateRecipient) return !message.isPrivate;
+    return (
+      message.isPrivate &&
+      (message.senderId === privateRecipient.id ||
+        message.recipientId === privateRecipient.id)
+    );
+  });
 
   return (
     <div className={`chat-box-container ${isOpen ? "open" : "collapsed"}`}>
@@ -2013,18 +2068,76 @@ function ChatBox({
           >
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
-          <span>{messages.length} messages</span>
-          {/* Badge — only visible when collapsed due to CSS, positioned absolutely */}
+          <span>{visibleMessages.length} messages</span>
           {unread > 0 && (
-            <span className="chat-msg-badge">
+            <span className="chat-total-unread">
+              {unread > 99 ? "99+" : unread} unread
+            </span>
+          )}
+          {unread > 0 && (
+            <span className="chat-msg-badge" aria-hidden="true">
               {unread > 99 ? "99+" : unread}
             </span>
           )}
+          {/* Badge — only visible when collapsed due to CSS, positioned absolutely */}
         </div>
-        <div className="online-indicator chat-online-indicator" aria-live="polite">
+        <button
+          type="button"
+          className="online-indicator chat-online-indicator"
+          onClick={(event) => {
+            event.stopPropagation();
+            setShowPlayers((current) => !current);
+          }}
+          aria-expanded={showPlayers}
+          title="View online players"
+        >
           <span className={isConnected ? "online-dot" : "offline-dot"} />
           <span>{isConnected ? `${onlineCount} online` : "offline"}</span>
-        </div>
+        </button>
+        {showPlayers && (
+          <div className="online-player-popover" onClick={(event) => event.stopPropagation()}>
+            <div className="online-player-popover-title">Online players</div>
+            {otherPlayers.length === 0 ? (
+              <div className="online-player-empty">No other players online</div>
+            ) : (
+              otherPlayers.map((player) => {
+                const playerUnread = unreadPrivateMessages.filter(
+                  (message) => message.senderId === player.id,
+                ).length;
+
+                return (
+                  <button
+                  type="button"
+                  className="online-player-row"
+                  key={player.id}
+                  onClick={() => {
+                    setPrivateRecipient(player);
+                    setShowPlayers(false);
+                    setIsOpen(true);
+                  }}
+                >
+                  <span className="online-player-avatar">
+                    {(player.name || "P").charAt(0).toUpperCase()}
+                  </span>
+                  <span className="online-player-details">
+                    <strong>{player.name || "Unknown player"}</strong>
+                    <small>
+                      {player.character === "iska" ? "Iska" : "Isko"}
+                      {player.device ? ` · ${player.device}` : ""}
+                      {player.location ? ` · ${formatLocationCityCountry(player.location)}` : ""}
+                    </small>
+                  </span>
+                  {playerUnread > 0 && (
+                    <span className="online-player-unread" aria-label={`${playerUnread} unread messages`}>
+                      {playerUnread > 99 ? "99+" : playerUnread}
+                    </span>
+                  )}
+                </button>
+                );
+              })
+            )}
+          </div>
+        )}
         <button
           type="button"
           className="chat-box-toggle-btn"
@@ -2041,12 +2154,14 @@ function ChatBox({
       {isOpen && (
         <>
           <div ref={messagesContainerRef} className="chat-box-messages">
-            {messages.length === 0 ? (
+            {visibleMessages.length === 0 ? (
               <div className="chat-empty-hint">
-                say something... press Enter to start chatting
+                {privateRecipient
+                  ? `No private messages with ${privateRecipient.name}`
+                  : "say something... press Enter to start chatting"}
               </div>
             ) : (
-              messages.map((msg) => {
+              visibleMessages.map((msg) => {
                 if (msg.isSystem) {
                   return (
                     <div key={msg.id} className="chat-msg-system">
@@ -2064,7 +2179,10 @@ function ChatBox({
                 const timeAgo = formatTimeAgo(msg.timestamp, now);
 
                 return (
-                  <div key={msg.id} className="chat-msg-row">
+                  <div
+                    key={msg.id}
+                    className={`chat-msg-row ${isMe ? "is-own" : ""}`}
+                  >
                     <div className="chat-avatar-circle">
                       <AvatarSketch
                         name={msg.senderName}
@@ -2109,6 +2227,48 @@ function ChatBox({
           </div>
 
           <div className="chat-footer-area">
+            <div className="chat-mode-switch" role="tablist" aria-label="Chat type">
+              <button
+                type="button"
+                className={!privateRecipient ? "is-active" : ""}
+                onClick={() => setPrivateRecipient(null)}
+                role="tab"
+                aria-selected={!privateRecipient}
+              >
+                Public chat
+                {publicUnread > 0 && (
+                  <span className="chat-mode-count">
+                    {publicUnread > 99 ? "99+" : publicUnread}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                className={privateRecipient ? "is-active" : ""}
+                onClick={() => {
+                  if (privateRecipient) return;
+                  const unreadSender = otherPlayers.find((player) =>
+                    unreadPrivateMessages.some(
+                      (message) => message.senderId === player.id,
+                    ),
+                  );
+                  const recipient = unreadSender ?? otherPlayers[0];
+                  if (recipient) setPrivateRecipient(recipient);
+                }}
+                role="tab"
+                aria-selected={Boolean(privateRecipient)}
+                disabled={!privateRecipient && otherPlayers.length === 0}
+              >
+                <span>
+                  {privateRecipient ? `Private · ${privateRecipient.name}` : "Private chat"}
+                </span>
+                {privateUnread > 0 && (
+                  <span className="chat-mode-count">
+                    {privateUnread > 99 ? "99+" : privateUnread}
+                  </span>
+                )}
+              </button>
+            </div>
             <div className="chat-status-text">
               chatting as <strong>{playerName || "Isko"}</strong>
             </div>
@@ -2453,6 +2613,7 @@ export default function App() {
             playerName={playerName}
             onlineCount={multiplayer.players.size}
             isConnected={multiplayer.connected}
+            players={multiplayer.players}
           />
 
           {/* MOBILE JOYSTICK & BUTTONS */}

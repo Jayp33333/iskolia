@@ -77,6 +77,8 @@ export interface ChatMessage {
   text: string;
   timestamp: number;
   isSystem?: boolean;
+  recipientId?: string;
+  isPrivate?: boolean;
 }
 
 const chatHistory: ChatMessage[] = [];
@@ -151,7 +153,7 @@ io.on("connection", (socket: Socket) => {
   );
 
   // Handle chat messages
-  socket.on("chat:send", (data: { text: string; device?: DeviceType }) => {
+  socket.on("chat:send", (data: { text: string; device?: DeviceType; recipientId?: string }) => {
     const existing = players.get(socket.id);
     if (!existing) return;
 
@@ -174,6 +176,20 @@ io.on("connection", (socket: Socket) => {
       text: cleanText,
       timestamp: Date.now(),
     };
+
+    const recipientId =
+      typeof data?.recipientId === "string" && data.recipientId !== socket.id
+        ? data.recipientId
+        : undefined;
+
+    if (recipientId && !players.has(recipientId)) return;
+
+    if (recipientId) {
+      newMsg.recipientId = recipientId;
+      newMsg.isPrivate = true;
+      io.to(socket.id).to(recipientId).emit("chat:message", newMsg);
+      return;
+    }
 
     chatHistory.push(newMsg);
     if (chatHistory.length > 50) chatHistory.shift();

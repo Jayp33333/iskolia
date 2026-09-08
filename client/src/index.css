@@ -946,6 +946,111 @@ select {
   box-shadow: none;
 }
 
+.chat-online-indicator:hover {
+  background: #f4f4f5;
+  color: #18181b;
+}
+
+.online-player-popover {
+  position: absolute;
+  top: 48px;
+  right: 12px;
+  z-index: 5;
+  width: min(260px, calc(100% - 24px));
+  padding: 8px;
+  border: 1px solid #e4e4e7;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+}
+
+.online-player-popover-title {
+  padding: 5px 8px 7px;
+  color: #71717a;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.online-player-empty {
+  padding: 10px 8px;
+  color: #71717a;
+  font-size: 11px;
+}
+
+.online-player-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #18181b;
+  text-align: left;
+  cursor: pointer;
+}
+
+.online-player-row:hover {
+  background: #f4f4f5;
+}
+
+.online-player-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: 1px solid #d4d4d8;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #18181b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.online-player-details {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.online-player-unread {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #18181b;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.online-player-details strong,
+.online-player-details small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-player-details strong {
+  font-size: 11px;
+}
+
+.online-player-details small {
+  color: #71717a;
+  font-size: 9px;
+}
+
 /* Collapsed header: centered icon */
 .chat-box-container.collapsed .chat-box-header {
   padding: 0;
@@ -998,6 +1103,17 @@ select {
   stroke: currentColor;
 }
 
+.chat-total-unread {
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #18181b;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 /* Notification badge on collapsed icon */
 .chat-msg-badge {
   position: absolute;
@@ -1018,6 +1134,10 @@ select {
   line-height: 1;
   pointer-events: none;
   animation: badgePop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.chat-box-container.open .chat-msg-badge {
+  display: none;
 }
 
 @keyframes badgePop {
@@ -1091,6 +1211,11 @@ select {
   animation: chatMsgFadeIn 0.2s ease-out;
 }
 
+/* Place the current player's messages opposite everyone else's. */
+.chat-msg-row.is-own {
+  flex-direction: row-reverse;
+}
+
 @keyframes chatMsgFadeIn {
   from {
     opacity: 0;
@@ -1130,6 +1255,15 @@ select {
   gap: 4px;
   min-width: 0;
   flex: 1;
+}
+
+.chat-msg-row.is-own .chat-msg-content-col {
+  align-items: flex-end;
+}
+
+.chat-msg-row.is-own .chat-meta-line {
+  justify-content: flex-end;
+  text-align: right;
 }
 
 .chat-meta-line {
@@ -1205,6 +1339,74 @@ select {
   flex-direction: column;
   gap: 6px;
   border-top: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.chat-mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  background: #f4f4f5;
+}
+
+.chat-mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  flex: 1;
+  padding: 5px 7px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #71717a;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-mode-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #18181b;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.chat-mode-switch button.is-active {
+  background: #ffffff;
+  color: #18181b;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  font-weight: 700;
+}
+
+.chat-mode-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.chat-mode-switch button:not(:disabled):hover {
+  color: #18181b;
+}
+
+.private-chat-bar strong {
+  color: #18181b;
+}
+
+.private-chat-bar button {
+  font-size: 10px;
 }
 
 .chat-status-text {
