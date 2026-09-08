@@ -26,10 +26,14 @@ export type AnimationName = "Idle" | "Walk" | "Run" | "Jump" | "RunJump";
 
 export type CharacterChoice = "isko" | "iska";
 
+export type DeviceType = "desktop" | "mobile";
+
 export interface PlayerState {
   id: string;
   name: string;
   character: CharacterChoice;
+  location?: string;
+  device?: DeviceType;
   position: PlayerPosition;
   rotation: PlayerRotation;
   animation: AnimationName;
@@ -68,6 +72,8 @@ export interface ChatMessage {
   senderId: string;
   senderName: string;
   character?: CharacterChoice;
+  location?: string;
+  device?: DeviceType;
   text: string;
   timestamp: number;
   isSystem?: boolean;
@@ -81,6 +87,7 @@ io.on("connection", (socket: Socket) => {
     id: socket.id,
     name: `Player #${shortId}`,
     character: "isko",
+    device: "desktop",
     position: { x: 0, y: 1, z: 0 },
     rotation: { y: 0 },
     animation: "Idle",
@@ -119,7 +126,7 @@ io.on("connection", (socket: Socket) => {
   // Handle character & profile customization
   socket.on(
     "player:customize",
-    (data: { name?: string; character?: CharacterChoice }) => {
+    (data: { name?: string; character?: CharacterChoice; location?: string; device?: DeviceType }) => {
       const existing = players.get(socket.id);
       if (!existing) return;
 
@@ -131,12 +138,20 @@ io.on("connection", (socket: Socket) => {
         existing.character = data.character;
       }
 
+      if (data.location && typeof data.location === "string") {
+        existing.location = data.location.trim().slice(0, 45) || existing.location;
+      }
+
+      if (data.device === "mobile" || data.device === "desktop") {
+        existing.device = data.device;
+      }
+
       io.emit("player:updated", existing);
     }
   );
 
   // Handle chat messages
-  socket.on("chat:send", (data: { text: string }) => {
+  socket.on("chat:send", (data: { text: string; device?: DeviceType }) => {
     const existing = players.get(socket.id);
     if (!existing) return;
 
@@ -144,11 +159,18 @@ io.on("connection", (socket: Socket) => {
     const cleanText = raw.trim().slice(0, 250);
     if (!cleanText) return;
 
+    const device =
+      data?.device === "mobile" || data?.device === "desktop"
+        ? data.device
+        : existing.device || "desktop";
+
     const newMsg: ChatMessage = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       senderId: socket.id,
       senderName: existing.name,
       character: existing.character,
+      location: existing.location,
+      device: device,
       text: cleanText,
       timestamp: Date.now(),
     };
@@ -167,6 +189,8 @@ io.on("connection", (socket: Socket) => {
       rotation?: PlayerRotation;
       animation?: AnimationName;
       character?: CharacterChoice;
+      location?: string;
+      device?: DeviceType;
     }) => {
       const existing = players.get(socket.id);
       if (!existing) return;
@@ -191,6 +215,14 @@ io.on("connection", (socket: Socket) => {
 
       if (data.character === "isko" || data.character === "iska") {
         existing.character = data.character;
+      }
+
+      if (data.location && typeof data.location === "string") {
+        existing.location = data.location.trim().slice(0, 45);
+      }
+
+      if (data.device === "mobile" || data.device === "desktop") {
+        existing.device = data.device;
       }
 
       // Broadcast movement to all other clients
