@@ -1,5 +1,5 @@
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Sky, useGLTF, useAnimations, Html } from "@react-three/drei";
+import { Sky, useGLTF, useAnimations, Html, OrbitControls } from "@react-three/drei";
 import { Physics, RigidBody, CuboidCollider } from "@react-three/rapier";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 
@@ -40,6 +40,16 @@ type PlayerState = {
   animation?: AnimationName;
 };
 
+type ChatMessage = {
+  id: string;
+  senderId: string;
+  senderName: string;
+  character?: CharacterChoice;
+  text: string;
+  timestamp: number;
+  isSystem?: boolean;
+};
+
 type MultiplayerSocket = Socket<
   {
     session: (session: { id: string; player?: PlayerState }) => void;
@@ -48,6 +58,8 @@ type MultiplayerSocket = Socket<
     "player:moved": (player: PlayerState) => void;
     "player:updated": (player: PlayerState) => void;
     "player:left": (data: { id: string }) => void;
+    "chat:message": (msg: ChatMessage) => void;
+    "chat:history": (history: ChatMessage[]) => void;
   },
   {
     "player:move": (data: {
@@ -60,6 +72,7 @@ type MultiplayerSocket = Socket<
       name?: string;
       character?: CharacterChoice;
     }) => void;
+    "chat:send": (data: { text: string }) => void;
   }
 >;
 
@@ -88,10 +101,23 @@ function useKeyboard() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
       keys.current.add(event.key.toLowerCase());
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement
+      ) {
+        keys.current.clear();
+        return;
+      }
       keys.current.delete(event.key.toLowerCase());
     };
 
@@ -199,11 +225,15 @@ function CharacterModel({
 function Player({
   ecctrl,
   character = "isko",
+  chatBubble,
   onAnimationChange,
+  canControl = true,
 }: {
   ecctrl: React.RefObject<EcctrlHandle | null>;
   character?: CharacterChoice;
+  chatBubble?: string | null;
   onAnimationChange?: (animation: AnimationName) => void;
+  canControl?: boolean;
 }) {
   const keys = useKeyboard();
 
@@ -261,6 +291,23 @@ function Player({
       ecctrl.current;
 
     if (!controller) return;
+
+    if (!canControl) {
+      controller.setMovement({
+        forward: false,
+        backward: false,
+        leftward: false,
+        rightward: false,
+        run: false,
+        jump: false,
+      });
+      if (previousAnimation.current !== "Idle") {
+        previousAnimation.current = "Idle";
+        setAnimation("Idle");
+        onAnimationChange?.("Idle");
+      }
+      return;
+    }
 
     // ========================================================
     // KEYBOARD
@@ -510,6 +557,14 @@ function Player({
         animation={animation}
         character={character}
       />
+
+      {chatBubble && (
+        <Html position={[0, 1.8, 0]} center distanceFactor={14}>
+          <div className="chat-speech-bubble">
+            {chatBubble}
+          </div>
+        </Html>
+      )}
     </Ecctrl>
   );
 }
@@ -571,6 +626,88 @@ function PlayerCamera({
       maxDistance={10}
     />
   );
+}
+
+// ============================================================
+// INTRO ORBIT CAMERA
+// ============================================================
+
+function IntroCamera() {
+  return (
+    <OrbitControls
+      makeDefault
+      autoRotate
+      autoRotateSpeed={1.0}
+      enableDamping
+      dampingFactor={0.06}
+      minDistance={6}
+      maxDistance={26}
+      minPolarAngle={Math.PI * 0.2}
+      maxPolarAngle={Math.PI * 0.47}
+      target={[0, 1.2, 0]}
+      enablePan={false}
+    />
+  );
+}
+
+// ============================================================
+// TRANSITION CAMERA (SWOOP FROM ORBIT TO THIRD PERSON)
+// ============================================================
+
+function TransitionCamera({
+  target,
+  onComplete,
+}: {
+  target: React.RefObject<EcctrlHandle | null>;
+  onComplete: () => void;
+}) {
+  const startPos = useRef<THREE.Vector3 | null>(null);
+  const startLookAt = useRef<THREE.Vector3 | null>(null);
+  const elapsed = useRef(0);
+  const DURATION = 1.2;
+
+  useFrame((state, delta) => {
+    const player = target.current;
+    const playerPos = player?.currPos || new THREE.Vector3(0, 0, 0);
+
+    if (!startPos.current || !startLookAt.current) {
+      startPos.current = state.camera.position.clone();
+      startLookAt.current = new THREE.Vector3(0, 1.2, 0);
+    }
+
+    const fromPos = startPos.current;
+    const fromLookAt = startLookAt.current;
+
+    elapsed.current += delta;
+    const t = Math.min(1, elapsed.current / DURATION);
+    // Smooth easeInOutCubic
+    const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+    const endPos = new THREE.Vector3(
+      playerPos.x,
+      playerPos.y + 2.5,
+      playerPos.z + 5.5,
+    );
+    const endLookAt = new THREE.Vector3(
+      playerPos.x,
+      playerPos.y + 1.3,
+      playerPos.z,
+    );
+
+    state.camera.position.lerpVectors(fromPos, endPos, ease);
+    const look = new THREE.Vector3().lerpVectors(
+      fromLookAt,
+      endLookAt,
+      ease,
+    );
+    state.camera.lookAt(look);
+
+    if (t >= 1) {
+      onComplete();
+    }
+  });
+
+  return null;
 }
 
 // ============================================================
@@ -764,7 +901,13 @@ function Box({
   );
 }
 
-function RemotePlayer({ player }: { player: PlayerState }) {
+function RemotePlayer({
+  player,
+  chatBubble,
+}: {
+  player: PlayerState;
+  chatBubble?: string | null;
+}) {
   const group = useRef<THREE.Group>(null);
   const targetPos = useRef(
     new THREE.Vector3(player.position.x, player.position.y, player.position.z),
@@ -815,6 +958,14 @@ function RemotePlayer({ player }: { player: PlayerState }) {
           <span>{player.name || `${charType === "iska" ? "Iska" : "Isko"} #${player.id.slice(0, 4)}`}</span>
         </div>
       </Html>
+
+      {chatBubble && (
+        <Html position={[0, 2.0, 0]} center distanceFactor={14}>
+          <div className="chat-speech-bubble">
+            {chatBubble}
+          </div>
+        </Html>
+      )}
     </group>
   );
 }
@@ -822,13 +973,21 @@ function RemotePlayer({ player }: { player: PlayerState }) {
 function RemotePlayers({
   players,
   ownId,
+  chatBubbles,
 }: {
   players: Map<string, PlayerState>;
   ownId: string | null;
+  chatBubbles: Map<string, { text: string; expiresAt: number }>;
 }) {
   return Array.from(players.values())
     .filter((player) => player.id !== ownId)
-    .map((player) => <RemotePlayer key={player.id} player={player} />);
+    .map((player) => (
+      <RemotePlayer
+        key={player.id}
+        player={player}
+        chatBubble={chatBubbles.get(player.id)?.text}
+      />
+    ));
 }
 
 function MultiplayerSync({
@@ -1067,6 +1226,10 @@ function useMultiplayer() {
   const [players, setPlayers] = useState<Map<string, PlayerState>>(new Map());
   const [ownId, setOwnId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chatBubbles, setChatBubbles] = useState<
+    Map<string, { text: string; expiresAt: number }>
+  >(new Map());
   const socketRef = useRef<MultiplayerSocket | null>(null);
 
   useEffect(() => {
@@ -1119,6 +1282,35 @@ function useMultiplayer() {
       });
     });
 
+    socket.on("chat:history", (history) => {
+      setMessages(history);
+    });
+
+    socket.on("chat:message", (msg) => {
+      setMessages((prev) => [...prev.slice(-49), msg]);
+
+      if (!msg.isSystem && msg.senderId) {
+        const expiresAt = Date.now() + 6500;
+        setChatBubbles((prev) => {
+          const next = new Map(prev);
+          next.set(msg.senderId, { text: msg.text, expiresAt });
+          return next;
+        });
+
+        setTimeout(() => {
+          setChatBubbles((prev) => {
+            const current = prev.get(msg.senderId);
+            if (current && current.expiresAt <= Date.now() + 100) {
+              const next = new Map(prev);
+              next.delete(msg.senderId);
+              return next;
+            }
+            return prev;
+          });
+        }, 6600);
+      }
+    });
+
     return () => {
       socket.disconnect();
       socketRef.current = null;
@@ -1129,23 +1321,167 @@ function useMultiplayer() {
     socketRef.current?.emit("player:customize", { name, character });
   };
 
-  return { connected, ownId, players, socketRef, customizePlayer };
+  const sendMessage = (text: string) => {
+    socketRef.current?.emit("chat:send", { text });
+  };
+
+  return {
+    connected,
+    ownId,
+    players,
+    messages,
+    chatBubbles,
+    socketRef,
+    customizePlayer,
+    sendMessage,
+  };
 }
 
 // ============================================================
-// CHARACTER SELECT MODAL
+// STARTING INTRO SCREEN
 // ============================================================
 
-function CharacterSelectModal({
+type GamePhase = "intro" | "transitioning" | "playing";
+
+function StartIntroScreen({
+  character,
+  name,
+  onSelectCharacter,
+  onNameChange,
+  onEnter,
+  onlineCount,
+  isConnected,
+}: {
+  character: CharacterChoice;
+  name: string;
+  onSelectCharacter: (char: CharacterChoice) => void;
+  onNameChange: (name: string) => void;
+  onEnter: () => void;
+  onlineCount: number;
+  isConnected: boolean;
+}) {
+  return (
+    <div className="start-intro-overlay">
+      <div className="start-intro-card">
+        <div className="start-intro-header">
+          <div className="start-intro-badge">
+            <span className="badge-sparkle">✨</span>
+            <span>ISKOLIA 3D CAMPUS</span>
+          </div>
+          <h1 className="start-intro-title">Welcome to Campus</h1>
+          <p className="start-intro-subtitle">
+            Choose your student avatar and enter the real-time virtual university
+          </p>
+        </div>
+
+        {/* CHARACTER SELECTION WITH LIVE 3D PREVIEW */}
+        <div className="char-cards-container">
+          <button
+            type="button"
+            className={`char-card ${character === "isko" ? "selected-isko" : ""}`}
+            onClick={() => onSelectCharacter("isko")}
+          >
+            <div className="char-avatar-icon char-avatar-isko">👦</div>
+            <span className="char-name">Isko</span>
+            <span className="char-tag char-tag-isko">Male Student</span>
+          </button>
+
+          <button
+            type="button"
+            className={`char-card ${character === "iska" ? "selected-iska" : ""}`}
+            onClick={() => onSelectCharacter("iska")}
+          >
+            <div className="char-avatar-icon char-avatar-iska">👧</div>
+            <span className="char-name">Iska</span>
+            <span className="char-tag char-tag-iska">Female Student</span>
+          </button>
+        </div>
+
+        {/* DISPLAY NAME */}
+        <div className="char-input-group">
+          <label className="char-input-label">Student Name</label>
+          <input
+            type="text"
+            maxLength={18}
+            className="char-name-input"
+            placeholder="Enter your student name..."
+            value={name}
+            onChange={(e) => onNameChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                onEnter();
+              }
+            }}
+          />
+        </div>
+
+        {/* QUICK STATUS & CONTROLS GUIDE */}
+        <div className="start-info-row">
+          <div className="start-status-chip">
+            <span className={isConnected ? "online-dot" : "offline-dot"} />
+            <span>
+              {isConnected ? `${onlineCount} Online` : "Connecting..."}
+            </span>
+          </div>
+          <div className="start-controls-hints">
+            <span>⌨️ WASD Move</span>
+            <span>⚡ Shift Sprint</span>
+            <span>🦘 Space Jump</span>
+            <span>💬 Enter Chat</span>
+          </div>
+        </div>
+
+        {/* CTA ENTER BUTTON */}
+        <button
+          type="button"
+          className="btn-enter-world btn-enter-campus-glow"
+          onClick={onEnter}
+        >
+          Enter Campus 🚀
+        </button>
+      </div>
+
+      {/* BOTTOM ORBIT CAMERA HINT */}
+      <div className="start-orbit-hint">
+        <span className="orbit-dot-pulse" />
+        <span>Cinematic Orbit Active • Drag anywhere on the screen to look around</span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ENTERING TRANSITION OVERLAY
+// ============================================================
+
+function EnteringOverlay({ playerName }: { playerName: string }) {
+  return (
+    <div className="entering-transition-overlay">
+      <div className="entering-content">
+        <div className="entering-spinner" />
+        <h2 className="entering-title">Entering Campus...</h2>
+        <p className="entering-name">Welcome, {playerName}!</p>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// EDIT PROFILE MODAL (IN-GAME)
+// ============================================================
+
+function EditProfileModal({
   isOpen,
   initialCharacter,
   initialName,
-  onConfirm,
+  onClose,
+  onSave,
 }: {
   isOpen: boolean;
   initialCharacter: CharacterChoice;
   initialName: string;
-  onConfirm: (character: CharacterChoice, name: string) => void;
+  onClose: () => void;
+  onSave: (character: CharacterChoice, name: string) => void;
 }) {
   const [selected, setSelected] = useState<CharacterChoice>(initialCharacter);
   const [name, setName] = useState(initialName);
@@ -1158,12 +1494,15 @@ function CharacterSelectModal({
   if (!isOpen) return null;
 
   return (
-    <div className="char-modal-backdrop">
-      <div className="char-modal-box">
-        <div>
-          <h2 className="char-modal-title">Welcome to Iskolia</h2>
-          <p className="char-modal-subtitle">Choose your character to enter campus</p>
+    <div className="char-modal-backdrop" onClick={onClose}>
+      <div className="char-modal-box" onClick={(e) => e.stopPropagation()}>
+        <div className="char-modal-header-row">
+          <h2 className="char-modal-title">Student Profile</h2>
+          <button type="button" className="modal-close-btn" onClick={onClose}>
+            ✕
+          </button>
         </div>
+        <p className="char-modal-subtitle">Customize your character and display name</p>
 
         <div className="char-cards-container">
           <div
@@ -1197,19 +1536,142 @@ function CharacterSelectModal({
           />
         </div>
 
+        <div className="modal-buttons-row">
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-enter-world"
+            style={{ flex: 1 }}
+            onClick={() => {
+              onSave(selected, name.trim() || (selected === "iska" ? "Iska" : "Isko"));
+              onClose();
+            }}
+          >
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// CHAT BOX COMPONENT
+// ============================================================
+
+function ChatBox({
+  messages,
+  onSendMessage,
+  ownId,
+}: {
+  messages: ChatMessage[];
+  onSendMessage: (text: string) => void;
+  ownId: string | null;
+}) {
+  const [inputVal, setInputVal] = useState("");
+  const [isOpen, setIsOpen] = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isOpen]);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Enter") {
+        if (document.activeElement !== inputRef.current) {
+          e.preventDefault();
+          setIsOpen(true);
+          setTimeout(() => inputRef.current?.focus(), 50);
+        }
+      } else if (e.key === "Escape") {
+        inputRef.current?.blur();
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputVal.trim()) return;
+    onSendMessage(inputVal.trim());
+    setInputVal("");
+  };
+
+  return (
+    <div className={`chat-box-container ${isOpen ? "open" : "collapsed"}`}>
+      <div className="chat-box-header" onClick={() => setIsOpen(!isOpen)}>
+        <div className="chat-box-title">
+          <span>💬</span>
+          <span>Campus Chat</span>
+        </div>
         <button
           type="button"
-          className="btn-enter-world"
-          onClick={() =>
-            onConfirm(
-              selected,
-              name.trim() || (selected === "iska" ? "Iska" : "Isko"),
-            )
-          }
+          className="chat-box-toggle-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsOpen(!isOpen);
+          }}
+          title={isOpen ? "Minimize chat" : "Expand chat"}
         >
-          Enter Campus 🚀
+          {isOpen ? "−" : "+"}
         </button>
       </div>
+
+      {isOpen && (
+        <>
+          <div className="chat-box-messages">
+            {messages.length === 0 ? (
+              <div className="chat-empty-hint">
+                No messages yet. Press Enter to say hi! 👋
+              </div>
+            ) : (
+              messages.map((msg) => {
+                if (msg.isSystem) {
+                  return (
+                    <div key={msg.id} className="chat-msg system">
+                      <span className="chat-sys-icon">⚡</span>
+                      <span>{msg.text}</span>
+                    </div>
+                  );
+                }
+
+                const isMe = msg.senderId === ownId;
+                const charType = msg.character || "isko";
+
+                return (
+                  <div key={msg.id} className={`chat-msg ${isMe ? "own" : ""}`}>
+                    <span className={`chat-sender-badge ${charType}`}>
+                      {isMe ? "You" : msg.senderName}
+                    </span>
+                    <span className="chat-msg-text">{msg.text}</span>
+                  </div>
+                );
+              })
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          <form className="chat-box-input-form" onSubmit={handleSubmit}>
+            <input
+              ref={inputRef}
+              type="text"
+              className="chat-input"
+              maxLength={200}
+              placeholder="Press Enter to chat..."
+              value={inputVal}
+              onChange={(e) => setInputVal(e.target.value)}
+            />
+            <button type="submit" className="chat-send-btn" title="Send message">
+              ➤
+            </button>
+          </form>
+        </>
+      )}
     </div>
   );
 }
@@ -1228,22 +1690,32 @@ export default function App() {
     return localStorage.getItem("iskolia_player_name") || "Isko";
   });
 
-  const [hasStarted, setHasStarted] = useState<boolean>(() => {
-    return localStorage.getItem("iskolia_has_started") === "true";
-  });
+  const [gamePhase, setGamePhase] = useState<GamePhase>("intro");
+  const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
 
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(!hasStarted);
+  const handleEnterCampus = () => {
+    const finalName = playerName.trim() || (character === "iska" ? "Iska" : "Isko");
+    setPlayerName(finalName);
+    localStorage.setItem("iskolia_character", character);
+    localStorage.setItem("iskolia_player_name", finalName);
 
-  const handleSelectCharacter = (chosen: CharacterChoice, name: string) => {
+    multiplayer.customizePlayer(finalName, character);
+    setGamePhase("transitioning");
+  };
+
+  const handleTransitionComplete = () => {
+    setGamePhase("playing");
+  };
+
+  const handleReturnToOrbit = () => {
+    setGamePhase("intro");
+  };
+
+  const handleSaveProfile = (chosen: CharacterChoice, name: string) => {
     setCharacter(chosen);
     setPlayerName(name);
-    setHasStarted(true);
-    setIsModalOpen(false);
-
     localStorage.setItem("iskolia_character", chosen);
     localStorage.setItem("iskolia_player_name", name);
-    localStorage.setItem("iskolia_has_started", "true");
-
     multiplayer.customizePlayer(name, chosen);
   };
 
@@ -1266,7 +1738,8 @@ export default function App() {
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
-        isModalOpen
+        gamePhase !== "playing" ||
+        isEditModalOpen
       ) {
         return;
       }
@@ -1277,35 +1750,30 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [character, playerName, isModalOpen]);
+  }, [character, playerName, gamePhase, isEditModalOpen]);
+
+  const ownChatBubble = multiplayer.chatBubbles.get(multiplayer.ownId || "")?.text;
 
   return (
     <div
       style={{
         width: "100vw",
-
         height: "100vh",
-
         overflow: "hidden",
-
         position: "relative",
-
         background: "#000",
       }}
     >
       {/* =====================================================
-          3D GAME
+          3D CANVAS
           ===================================================== */}
 
       <Canvas
         shadows
         camera={{
-          position: [0, 3, 8],
-
-          fov: 60,
-
+          position: [12, 6, 12],
+          fov: 55,
           near: 0.1,
-
           far: 1000,
         }}
         gl={{
@@ -1313,11 +1781,12 @@ export default function App() {
         }}
       >
         <Physics gravity={[0, -9.81, 0]}>
-          {/* PLAYER */}
-
+          {/* PLAYER AVATAR */}
           <Player
             ecctrl={ecctrl}
             character={character}
+            chatBubble={ownChatBubble}
+            canControl={gamePhase === "playing"}
             onAnimationChange={(anim) => {
               currentAnimation.current = anim;
             }}
@@ -1333,70 +1802,125 @@ export default function App() {
           <RemotePlayers
             players={multiplayer.players}
             ownId={multiplayer.ownId}
+            chatBubbles={multiplayer.chatBubbles}
           />
 
-          {/* CAMERA */}
+          {/* CAMERAS ACCORDING TO GAME PHASE */}
+          {gamePhase === "intro" && <IntroCamera />}
 
-          <PlayerCamera target={ecctrl} />
+          {gamePhase === "transitioning" && (
+            <TransitionCamera
+              target={ecctrl}
+              onComplete={handleTransitionComplete}
+            />
+          )}
+
+          {gamePhase === "playing" && <PlayerCamera target={ecctrl} />}
 
           {/* WORLD */}
-
           <World />
         </Physics>
       </Canvas>
 
       {/* =====================================================
-          TOP HUD
+          PHASE 1: STARTING INTRO SCREEN
           ===================================================== */}
 
-      <div className="hud-top-bar">
-        <button
-          type="button"
-          className={`char-switch-btn ${character === "isko" ? "is-iska" : "is-isko"}`}
-          onClick={handleQuickSwitch}
-          title={`Switch character to ${character === "isko" ? "Iska" : "Isko"} (Press C)`}
-        >
-          <span>{character === "isko" ? "👧 Switch to Iska" : "👦 Switch to Isko"}</span>
-          <span className="kbd-badge">C</span>
-        </button>
+      {gamePhase === "intro" && (
+        <StartIntroScreen
+          character={character}
+          name={playerName}
+          onSelectCharacter={(c) => {
+            setCharacter(c);
+            localStorage.setItem("iskolia_character", c);
+          }}
+          onNameChange={setPlayerName}
+          onEnter={handleEnterCampus}
+          onlineCount={multiplayer.players.size}
+          isConnected={multiplayer.connected}
+        />
+      )}
 
-        <button
-          type="button"
-          className="hud-btn"
-          onClick={() => setIsModalOpen(true)}
-          title="Edit Name / Choose Character"
-        >
-          <span>⚙️</span>
-        </button>
+      {/* =====================================================
+          PHASE 2: ENTERING TRANSITION OVERLAY
+          ===================================================== */}
 
-        <div className="online-indicator" aria-live="polite">
-          <span
-            className={multiplayer.connected ? "online-dot" : "offline-dot"}
+      {gamePhase === "transitioning" && (
+        <EnteringOverlay playerName={playerName} />
+      )}
+
+      {/* =====================================================
+          PHASE 3: IN-GAME HUD & CONTROLS
+          ===================================================== */}
+
+      {gamePhase === "playing" && (
+        <>
+          <div className="hud-top-bar">
+            {/* RETURN TO ORBIT VIEW BUTTON */}
+            <button
+              type="button"
+              className="hud-orbit-btn"
+              onClick={handleReturnToOrbit}
+              title="Return to Orbit View / Campus Tour"
+            >
+              <span>🎥</span>
+              <span>Orbit View</span>
+            </button>
+
+            {/* QUICK SWITCH CHARACTER BUTTON */}
+            <button
+              type="button"
+              className={`char-switch-btn ${character === "isko" ? "is-iska" : "is-isko"}`}
+              onClick={handleQuickSwitch}
+              title={`Switch character to ${character === "isko" ? "Iska" : "Isko"} (Press C)`}
+            >
+              <span>{character === "isko" ? "👧 Switch to Iska" : "👦 Switch to Isko"}</span>
+              <span className="kbd-badge">C</span>
+            </button>
+
+            {/* EDIT PROFILE BUTTON */}
+            <button
+              type="button"
+              className="hud-btn"
+              onClick={() => setIsEditModalOpen(true)}
+              title="Edit Profile & Character"
+            >
+              <span>⚙️</span>
+            </button>
+
+            {/* ONLINE BADGE */}
+            <div className="online-indicator" aria-live="polite">
+              <span
+                className={multiplayer.connected ? "online-dot" : "offline-dot"}
+              />
+              <span>
+                {multiplayer.connected
+                  ? `${multiplayer.players.size} online`
+                  : "Offline"}
+              </span>
+            </div>
+          </div>
+
+          {/* CAMPUS CHAT BOX */}
+          <ChatBox
+            messages={multiplayer.messages}
+            onSendMessage={multiplayer.sendMessage}
+            ownId={multiplayer.ownId}
           />
-          <span>
-            {multiplayer.connected
-              ? `${multiplayer.players.size} online`
-              : "Offline"}
-          </span>
-        </div>
-      </div>
 
-      {/* =====================================================
-          START / CHARACTER SELECT MODAL
-          ===================================================== */}
+          {/* MOBILE JOYSTICK & BUTTONS */}
+          <MobileControls />
 
-      <CharacterSelectModal
-        isOpen={isModalOpen}
-        initialCharacter={character}
-        initialName={playerName}
-        onConfirm={handleSelectCharacter}
-      />
-
-      {/* =====================================================
-          MOBILE UI
-          ===================================================== */}
-
-      <MobileControls />
+          {/* EDIT PROFILE MODAL */}
+          <EditProfileModal
+            isOpen={isEditModalOpen}
+            initialCharacter={character}
+            initialName={playerName}
+            onClose={() => setIsEditModalOpen(false)}
+            onSave={handleSaveProfile}
+          />
+        </>
+      )}
     </div>
   );
 }

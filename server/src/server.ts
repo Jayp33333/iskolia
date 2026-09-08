@@ -63,6 +63,18 @@ const io = new Server(server, {
   pingTimeout: 5000,
 });
 
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  character?: CharacterChoice;
+  text: string;
+  timestamp: number;
+  isSystem?: boolean;
+}
+
+const chatHistory: ChatMessage[] = [];
+
 io.on("connection", (socket: Socket) => {
   const shortId = socket.id.slice(0, 4).toUpperCase();
   const newPlayer: PlayerState = {
@@ -85,8 +97,24 @@ io.on("connection", (socket: Socket) => {
   // Send currently connected players to the new client
   socket.emit("players", Array.from(players.values()));
 
+  // Send recent chat history
+  socket.emit("chat:history", chatHistory);
+
   // Notify other players
   socket.broadcast.emit("player:joined", newPlayer);
+
+  // System notification
+  const joinMsg: ChatMessage = {
+    id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    senderId: "system",
+    senderName: "System",
+    text: `${newPlayer.name} joined the campus`,
+    timestamp: Date.now(),
+    isSystem: true,
+  };
+  chatHistory.push(joinMsg);
+  if (chatHistory.length > 50) chatHistory.shift();
+  io.emit("chat:message", joinMsg);
 
   // Handle character & profile customization
   socket.on(
@@ -106,6 +134,30 @@ io.on("connection", (socket: Socket) => {
       io.emit("player:updated", existing);
     }
   );
+
+  // Handle chat messages
+  socket.on("chat:send", (data: { text: string }) => {
+    const existing = players.get(socket.id);
+    if (!existing) return;
+
+    const raw = typeof data?.text === "string" ? data.text : "";
+    const cleanText = raw.trim().slice(0, 250);
+    if (!cleanText) return;
+
+    const newMsg: ChatMessage = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      senderId: socket.id,
+      senderName: existing.name,
+      character: existing.character,
+      text: cleanText,
+      timestamp: Date.now(),
+    };
+
+    chatHistory.push(newMsg);
+    if (chatHistory.length > 50) chatHistory.shift();
+
+    io.emit("chat:message", newMsg);
+  });
 
   // Handle movement updates
   socket.on(
@@ -148,11 +200,26 @@ io.on("connection", (socket: Socket) => {
 
   // Handle disconnect
   socket.on("disconnect", (reason) => {
+    const player = players.get(socket.id);
     players.delete(socket.id);
     console.log(
       `[-] Player disconnected: ${socket.id} (${reason}) | Remaining: ${players.size}`
     );
     io.emit("player:left", { id: socket.id });
+
+    if (player) {
+      const leaveMsg: ChatMessage = {
+        id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        senderId: "system",
+        senderName: "System",
+        text: `${player.name} left the campus`,
+        timestamp: Date.now(),
+        isSystem: true,
+      };
+      chatHistory.push(leaveMsg);
+      if (chatHistory.length > 50) chatHistory.shift();
+      io.emit("chat:message", leaveMsg);
+    }
   });
 });
 
