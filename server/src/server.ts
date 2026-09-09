@@ -284,13 +284,26 @@ app.get("/auth/:provider/callback", async (req, res) => {
         code,
       }).toString();
       const tokenResponse = await fetch(tokenUrl);
-      const token = (await tokenResponse.json()) as { access_token?: string };
-      if (!tokenResponse.ok || !token.access_token) throw new Error("Facebook token exchange failed");
+      const token = (await tokenResponse.json()) as {
+        access_token?: string;
+        error?: { message?: string; type?: string; code?: number };
+      };
+      if (!tokenResponse.ok || !token.access_token) {
+        throw new Error(`Facebook token exchange failed: ${token.error?.message || token.error?.type || "unknown error"}`);
+      }
       const profileUrl = new URL("https://graph.facebook.com/me");
       profileUrl.search = new URLSearchParams({ fields: "id,name,email,picture", access_token: token.access_token }).toString();
       const profileResponse = await fetch(profileUrl);
-      const profile = (await profileResponse.json()) as { id?: string; name?: string; email?: string; picture?: { data?: { url?: string } } };
-      if (!profileResponse.ok || !profile.id || !profile.name) throw new Error("Facebook profile is incomplete");
+      const profile = (await profileResponse.json()) as {
+        id?: string;
+        name?: string;
+        email?: string;
+        picture?: { data?: { url?: string } };
+        error?: { message?: string; type?: string; code?: number };
+      };
+      if (!profileResponse.ok || !profile.id || !profile.name) {
+        throw new Error(`Facebook profile request failed: ${profile.error?.message || profile.error?.type || "profile is incomplete"}`);
+      }
       user = { id: profile.id, name: profile.name, email: profile.email, picture: profile.picture?.data?.url, provider };
     }
 
