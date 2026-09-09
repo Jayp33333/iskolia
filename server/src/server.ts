@@ -2,15 +2,249 @@ import http from "node:http";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import crypto from "node:crypto";
+import jwt, { type JwtPayload } from "jsonwebtoken";
 import { Server, Socket } from "socket.io";
 
 dotenv.config();
 
 const PORT = Number(process.env.PORT) || 3001;
+const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+const PUBLIC_SERVER_URL = process.env.PUBLIC_SERVER_URL || `http://localhost:${PORT}`;
+const JWT_SECRET = process.env.JWT_SECRET;
+const isProduction = process.env.NODE_ENV === "production";
+
+if (isProduction && !JWT_SECRET) {
+  throw new Error("JWT_SECRET must be set when NODE_ENV=production");
+}
+
+const signingSecret = JWT_SECRET || "iskolia-development-only-secret";
+
+type AuthProvider = "google" | "facebook" | "development";
+
+interface AuthUser {
+  id: string;
+  name: string;
+  email?: string;
+  picture?: string;
+  provider: AuthProvider;
+}
+
+interface AuthTokenPayload extends JwtPayload {
+  user: AuthUser;
+}
+
+const oauthCodes = new Map<string, { user: AuthUser; expiresAt: number }>();
+
+function providerIsConfigured(provider: "google" | "facebook") {
+  return provider === "google"
+    ? Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+    : Boolean(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET);
+}
+
+function callbackUrl(provider: "google" | "facebook") {
+  return `${PUBLIC_SERVER_URL}/auth/${provider}/callback`;
+}
+
+function issueToken(user: AuthUser) {
+  return jwt.sign({ user }, signingSecret, { expiresIn: "7d" });
+}
+
+function readToken(token: unknown): AuthUser | null {
+  if (typeof token !== "string") return null;
+  try {
+    const payload = jwt.verify(token, signingSecret) as AuthTokenPayload;
+    const user = payload.user;
+    if (!user || typeof user.id !== "string" || typeof user.name !== "string") return null;
+    if (user.provider !== "google" && user.provider !== "facebook" && user.provider !== "development") {
+      return null;
+    }
+    if (user.provider === "development" && isProduction) return null;
+    return user;
+  } catch {
+    return null;
+  }
+}
+
+function redirectToClient(res: express.Response, params: Record<string, string>) {
+  const redirectUrl = new URL(CLIENT_URL);
+  Object.entries(params).forEach(([key, value]) => redirectUrl.searchParams.set(key, value));
+  res.redirect(redirectUrl.toString());
+}
+
+function clearOauthState(res: express.Response) {
+  res.clearCookie("iskolia_oauth_state", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isProduction,
+    path: "/auth",
+  });
+}
 
 const app = express();
-app.use(cors({ origin: "*" }));
+app.use(cors({ origin: CLIENT_URL }));
 app.use(express.json());
+
+app.get("/auth/providers", (_req, res) => {
+  res.json({
+    google: providerIsConfigured("google"),
+    facebook: providerIsConfigured("facebook"),
+    development: !isProduction,
+  });
+});
+
+function startOAuth(provider: "google" | "facebook", res: express.Response) {
+  if (!providerIsConfigured(provider)) {
+    res.status(503).json({ error: `${provider} sign-in is not configured on this server.` });
+    return;
+  }
+
+  const state = crypto.randomBytes(24).toString("hex");
+  res.cookie("iskolia_oauth_state", `${provider}:${state}`, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isProduction,
+    maxAge: 10 * 60 * 1000,
+    path: "/auth",
+  });
+
+  const authorizationUrl = new URL(
+    provider === "google"
+      ? "https://accounts.google.com/o/oauth2/v2/auth"
+      : "https://www.facebook.com/dialog/oauth",
+  );
+  if (provider === "google") {
+    authorizationUrl.search = new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID!,
+      redirect_uri: callbackUrl("google"),
+      response_type: "code",
+      scope: "openid email profile",
+      state,
+      prompt: "select_account",
+    }).toString();
+  } else {
+    authorizationUrl.search = new URLSearchParams({
+      client_id: process.env.FACEBOOK_APP_ID!,
+      redirect_uri: callbackUrl("facebook"),
+      response_type: "code",
+      scope: "email,public_profile",
+      state,
+    }).toString();
+  }
+  res.redirect(authorizationUrl.toString());
+}
+
+app.get("/auth/google", (_req, res) => startOAuth("google", res));
+app.get("/auth/facebook", (_req, res) => startOAuth("facebook", res));
+
+app.get("/auth/:provider/callback", async (req, res) => {
+  const provider = req.params.provider;
+  if (provider !== "google" && provider !== "facebook") {
+    res.status(404).send("Unknown sign-in provider.");
+    return;
+  }
+
+  const stateCookie = req.headers.cookie
+    ?.split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith("iskolia_oauth_state="))
+    ?.slice("iskolia_oauth_state=".length);
+  const state = typeof req.query.state === "string" ? req.query.state : "";
+  clearOauthState(res);
+
+  if (req.query.error || stateCookie !== `${provider}:${state}`) {
+    redirectToClient(res, { auth_error: "Sign-in could not be verified. Please try again." });
+    return;
+  }
+
+  const code = typeof req.query.code === "string" ? req.query.code : "";
+  if (!code) {
+    redirectToClient(res, { auth_error: "The sign-in provider did not return an authorization code." });
+    return;
+  }
+
+  try {
+    let user: AuthUser;
+    if (provider === "google") {
+      const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          code,
+          client_id: process.env.GOOGLE_CLIENT_ID!,
+          client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+          redirect_uri: callbackUrl("google"),
+          grant_type: "authorization_code",
+        }),
+      });
+      const token = (await tokenResponse.json()) as { access_token?: string };
+      if (!tokenResponse.ok || !token.access_token) throw new Error("Google token exchange failed");
+      const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+        headers: { Authorization: `Bearer ${token.access_token}` },
+      });
+      const profile = (await profileResponse.json()) as { sub?: string; name?: string; email?: string; picture?: string };
+      if (!profileResponse.ok || !profile.sub || !profile.name) throw new Error("Google profile is incomplete");
+      user = { id: profile.sub, name: profile.name, email: profile.email, picture: profile.picture, provider };
+    } else {
+      const tokenUrl = new URL("https://graph.facebook.com/oauth/access_token");
+      tokenUrl.search = new URLSearchParams({
+        client_id: process.env.FACEBOOK_APP_ID!,
+        client_secret: process.env.FACEBOOK_APP_SECRET!,
+        redirect_uri: callbackUrl("facebook"),
+        code,
+      }).toString();
+      const tokenResponse = await fetch(tokenUrl);
+      const token = (await tokenResponse.json()) as { access_token?: string };
+      if (!tokenResponse.ok || !token.access_token) throw new Error("Facebook token exchange failed");
+      const profileUrl = new URL("https://graph.facebook.com/me");
+      profileUrl.search = new URLSearchParams({ fields: "id,name,email,picture", access_token: token.access_token }).toString();
+      const profileResponse = await fetch(profileUrl);
+      const profile = (await profileResponse.json()) as { id?: string; name?: string; email?: string; picture?: { data?: { url?: string } } };
+      if (!profileResponse.ok || !profile.id || !profile.name) throw new Error("Facebook profile is incomplete");
+      user = { id: profile.id, name: profile.name, email: profile.email, picture: profile.picture?.data?.url, provider };
+    }
+
+    const authCode = crypto.randomBytes(32).toString("hex");
+    oauthCodes.set(authCode, { user, expiresAt: Date.now() + 60_000 });
+    redirectToClient(res, { auth_code: authCode });
+  } catch (error) {
+    console.error("OAuth callback failed", error);
+    redirectToClient(res, { auth_error: "Sign-in failed. Please try again." });
+  }
+});
+
+app.post("/auth/exchange", (req, res) => {
+  const code = typeof req.body?.code === "string" ? req.body.code : "";
+  const pending = oauthCodes.get(code);
+  oauthCodes.delete(code);
+  if (!pending || pending.expiresAt < Date.now()) {
+    res.status(401).json({ error: "Your sign-in link has expired. Please try again." });
+    return;
+  }
+  res.json({ token: issueToken(pending.user), user: pending.user });
+});
+
+app.get("/auth/me", (req, res) => {
+  const user = readToken(req.headers.authorization?.replace(/^Bearer\s+/i, ""));
+  if (!user) {
+    res.status(401).json({ error: "Session is invalid or expired." });
+    return;
+  }
+  res.json({ user });
+});
+
+app.post("/auth/development", (_req, res) => {
+  if (isProduction) {
+    res.status(404).end();
+    return;
+  }
+  const user: AuthUser = {
+    id: `dev-${crypto.randomUUID()}`,
+    name: "Developer",
+    provider: "development",
+  };
+  res.json({ token: issueToken(user), user });
+});
 
 export interface PlayerPosition {
   x: number;
@@ -60,7 +294,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: CLIENT_URL,
     methods: ["GET", "POST"],
   },
   pingInterval: 10000,
@@ -83,11 +317,22 @@ export interface ChatMessage {
 
 const chatHistory: ChatMessage[] = [];
 
+io.use((socket, next) => {
+  const user = readToken(socket.handshake.auth?.token);
+  if (!user) {
+    next(new Error("Authentication required"));
+    return;
+  }
+  socket.data.user = user;
+  next();
+});
+
 io.on("connection", (socket: Socket) => {
+  const user = socket.data.user as AuthUser;
   const shortId = socket.id.slice(0, 4).toUpperCase();
   const newPlayer: PlayerState = {
     id: socket.id,
-    name: `Player #${shortId}`,
+    name: user.name.trim().slice(0, 20) || `Player #${shortId}`,
     character: "isko",
     device: "desktop",
     position: { x: 0, y: 1, z: 0 },

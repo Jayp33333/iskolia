@@ -58,6 +58,32 @@ type ChatMessage = {
   isPrivate?: boolean;
 };
 
+type AuthProvider = "google" | "facebook" | "development";
+
+type AuthUser = {
+  id: string;
+  name: string;
+  email?: string;
+  picture?: string;
+  provider: AuthProvider;
+};
+
+type AuthProviders = {
+  google: boolean;
+  facebook: boolean;
+  development: boolean;
+};
+
+const AUTH_TOKEN_KEY = "iskolia_auth_token";
+
+function getServerUrl() {
+  return (
+    import.meta.env.VITE_MULTIPLAYER_URL ||
+    import.meta.env.VITE_SERVER_URL ||
+    "http://localhost:3001"
+  ).replace(/\/$/, "");
+}
+
 type MultiplayerSocket = Socket<
   {
     session: (session: { id: string; player?: PlayerState }) => void;
@@ -1365,7 +1391,7 @@ function useIsMobile() {
   return isMobile;
 }
 
-function useMultiplayer() {
+function useMultiplayer(authToken: string | null) {
   const [players, setPlayers] = useState<Map<string, PlayerState>>(new Map());
   const [ownId, setOwnId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
@@ -1376,13 +1402,13 @@ function useMultiplayer() {
   const socketRef = useRef<MultiplayerSocket | null>(null);
 
   useEffect(() => {
-    const serverUrl =
-      import.meta.env.VITE_MULTIPLAYER_URL ||
-      import.meta.env.VITE_SERVER_URL ||
-      "http://localhost:3001";
+    if (!authToken) {
+      return;
+    }
 
-    const socket = io(serverUrl, {
+    const socket = io(getServerUrl(), {
       autoConnect: true,
+      auth: { token: authToken },
     }) as MultiplayerSocket;
     socketRef.current = socket;
 
@@ -1458,7 +1484,7 @@ function useMultiplayer() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, []);
+  }, [authToken]);
 
   const customizePlayer = (
     name: string,
@@ -1500,12 +1526,69 @@ function useMultiplayer() {
 
 type GamePhase = "intro" | "transitioning" | "playing";
 
+function SignInScreen({
+  providers,
+  error,
+  onSignIn,
+  onDevelopmentSignIn,
+}: {
+  providers: AuthProviders | null;
+  error: string | null;
+  onSignIn: (provider: "google" | "facebook") => void;
+  onDevelopmentSignIn: () => void;
+}) {
+  const providersLoading = providers === null;
+
+  return (
+    <div className="auth-overlay">
+      <main className="auth-card">
+        <div className="start-intro-badge">ISKOLIA 3D CAMPUS</div>
+        <h1 className="auth-title">Sign in to play</h1>
+        <p className="auth-subtitle">
+          Your account keeps the campus community limited to signed-in players.
+        </p>
+        {error && <p className="auth-error" role="alert">{error}</p>}
+        <div className="auth-actions">
+          <button
+            type="button"
+            className="auth-button auth-button-google"
+            disabled={providersLoading || !providers?.google}
+            onClick={() => onSignIn("google")}
+          >
+            <span aria-hidden="true">G</span>
+            {providersLoading ? "Checking Google..." : providers?.google ? "Continue with Google" : "Google sign-in unavailable"}
+          </button>
+          <button
+            type="button"
+            className="auth-button auth-button-facebook"
+            disabled={providersLoading || !providers?.facebook}
+            onClick={() => onSignIn("facebook")}
+          >
+            <span aria-hidden="true">f</span>
+            {providersLoading ? "Checking Facebook..." : providers?.facebook ? "Continue with Facebook" : "Facebook sign-in unavailable"}
+          </button>
+        </div>
+        {import.meta.env.DEV && providers?.development && (
+          <>
+            <div className="auth-divider"><span>development only</span></div>
+            <button type="button" className="auth-dev-button" onClick={onDevelopmentSignIn}>
+              Continue without an account
+            </button>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
 function StartIntroScreen({
   character,
   name,
   onSelectCharacter,
   onNameChange,
   onEnter,
+  accountName,
+  onSignOut,
   onlineCount,
   isConnected,
 }: {
@@ -1514,6 +1597,8 @@ function StartIntroScreen({
   onSelectCharacter: (char: CharacterChoice) => void;
   onNameChange: (name: string) => void;
   onEnter: () => void;
+  accountName: string;
+  onSignOut: () => void;
   onlineCount: number;
   isConnected: boolean;
 }) {
@@ -1542,6 +1627,10 @@ function StartIntroScreen({
           <p className="start-intro-subtitle">
             Choose your student avatar and enter the virtual university
           </p>
+          <div className="signed-in-row">
+            <span>Signed in as {accountName}</span>
+            <button type="button" onClick={onSignOut}>Sign out</button>
+          </div>
         </div>
 
         {/* CHARACTER SELECTION */}
@@ -2296,7 +2385,13 @@ function ChatBox({
 export default function App() {
   const ecctrl = useRef<EcctrlHandle>(null);
   const currentAnimation = useRef<AnimationName>("Idle");
-  const multiplayer = useMultiplayer();
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authProviders, setAuthProviders] = useState<AuthProviders | null>(null);
+  const authRequestRef = useRef(false);
+  const multiplayer = useMultiplayer(authToken);
 
   const [character, setCharacter] = useState<CharacterChoice>(() => {
     const saved = localStorage.getItem("iskolia_character");
@@ -2316,6 +2411,104 @@ export default function App() {
   const [playerNotice, setPlayerNotice] = useState<string | null>(null);
   const previousPlayersRef = useRef<Map<string, PlayerState> | null>(null);
   const playerNoticeTimeoutRef = useRef<number | null>(null);
+
+  const saveAuthenticatedSession = (token: string, user: AuthUser) => {
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+    setAuthToken(token);
+    setAuthUser(user);
+    setPlayerName(user.name.trim().slice(0, 20) || "Student");
+    setAuthError(null);
+  };
+
+  useEffect(() => {
+    const serverUrl = getServerUrl();
+    const url = new URL(window.location.href);
+    const authCode = url.searchParams.get("auth_code");
+    const callbackError = url.searchParams.get("auth_error");
+    const finish = () => setAuthLoading(false);
+
+    if (callbackError) {
+      url.searchParams.delete("auth_error");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+      const timeoutId = window.setTimeout(() => {
+        setAuthError(callbackError);
+        finish();
+      }, 0);
+      return () => window.clearTimeout(timeoutId);
+    }
+
+    if (authCode && !authRequestRef.current) {
+      authRequestRef.current = true;
+      url.searchParams.delete("auth_code");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+      fetch(`${serverUrl}/auth/exchange`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: authCode }),
+      })
+        .then(async (response) => {
+          const result = (await response.json()) as { token?: string; user?: AuthUser; error?: string };
+          if (!response.ok || !result.token || !result.user) {
+            throw new Error(result.error || "Sign-in could not be completed.");
+          }
+          saveAuthenticatedSession(result.token, result.user);
+        })
+        .catch((error: unknown) => {
+          setAuthError(error instanceof Error ? error.message : "Sign-in could not be completed.");
+        })
+        .finally(finish);
+      return;
+    }
+
+    const savedToken = localStorage.getItem(AUTH_TOKEN_KEY);
+    if (!savedToken) {
+      finish();
+      return;
+    }
+    fetch(`${serverUrl}/auth/me`, { headers: { Authorization: `Bearer ${savedToken}` } })
+      .then(async (response) => {
+        const result = (await response.json()) as { user?: AuthUser };
+        if (!response.ok || !result.user) throw new Error("Session expired");
+        setAuthToken(savedToken);
+        setAuthUser(result.user);
+      })
+      .catch(() => localStorage.removeItem(AUTH_TOKEN_KEY))
+      .finally(finish);
+  }, []);
+
+  useEffect(() => {
+    fetch(`${getServerUrl()}/auth/providers`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load sign-in options");
+        setAuthProviders((await response.json()) as AuthProviders);
+      })
+      .catch(() => setAuthProviders({ google: false, facebook: false, development: false }));
+  }, []);
+
+  const handleProviderSignIn = (provider: "google" | "facebook") => {
+    window.location.assign(`${getServerUrl()}/auth/${provider}`);
+  };
+
+  const handleDevelopmentSignIn = async () => {
+    setAuthError(null);
+    try {
+      const response = await fetch(`${getServerUrl()}/auth/development`, { method: "POST" });
+      const result = (await response.json()) as { token?: string; user?: AuthUser; error?: string };
+      if (!response.ok || !result.token || !result.user) {
+        throw new Error(result.error || "Development sign-in is unavailable.");
+      }
+      saveAuthenticatedSession(result.token, result.user);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Development sign-in is unavailable.");
+    }
+  };
+
+  const handleSignOut = () => {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    setAuthToken(null);
+    setAuthUser(null);
+    setGamePhase("intro");
+  };
 
   useEffect(() => {
     const previousPlayers = previousPlayersRef.current;
@@ -2385,6 +2578,7 @@ export default function App() {
   }, [multiplayer.connected]);
 
   const handleEnterCampus = () => {
+    if (!authUser) return;
     const finalName = playerName.trim() || (character === "iska" ? "Iska" : "Isko");
     const finalLoc = playerLocation.trim();
     setPlayerName(finalName);
@@ -2529,18 +2723,29 @@ export default function App() {
           ===================================================== */}
 
       {gamePhase === "intro" && (
-        <StartIntroScreen
-          character={character}
-          name={playerName}
-          onSelectCharacter={(c) => {
-            setCharacter(c);
-            localStorage.setItem("iskolia_character", c);
-          }}
-          onNameChange={setPlayerName}
-          onEnter={handleEnterCampus}
-          onlineCount={multiplayer.players.size}
-          isConnected={multiplayer.connected}
-        />
+        authLoading ? null : authUser ? (
+          <StartIntroScreen
+            character={character}
+            name={playerName}
+            onSelectCharacter={(c) => {
+              setCharacter(c);
+              localStorage.setItem("iskolia_character", c);
+            }}
+            onNameChange={setPlayerName}
+            onEnter={handleEnterCampus}
+            accountName={authUser.name}
+            onSignOut={handleSignOut}
+            onlineCount={multiplayer.players.size}
+            isConnected={multiplayer.connected}
+          />
+        ) : (
+          <SignInScreen
+            providers={authProviders}
+            error={authError}
+            onSignIn={handleProviderSignIn}
+            onDevelopmentSignIn={handleDevelopmentSignIn}
+          />
+        )
       )}
 
       {/* =====================================================

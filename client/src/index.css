@@ -348,6 +348,161 @@ select {
   animation: cardEntrance 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* ============================================================
+   AUTHENTICATION
+   ============================================================ */
+
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(9, 9, 11, 0.25);
+}
+
+.auth-card {
+  width: min(100%, 420px);
+  padding: 32px;
+  border: 1px solid rgba(228, 228, 231, 0.9);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  color: #18181b;
+  text-align: center;
+  font-family: "JetBrains Mono", "SF Mono", "Roboto Mono", Menlo, Monaco, Consolas, monospace;
+}
+
+.auth-card .start-intro-badge {
+  display: inline-flex;
+}
+
+.auth-title {
+  margin: 18px 0 8px;
+  font-size: 25px;
+  letter-spacing: -0.04em;
+}
+
+.auth-subtitle {
+  margin: 0 auto 22px;
+  max-width: 320px;
+  color: #71717a;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.auth-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-button,
+.auth-dev-button {
+  display: flex;
+  width: 100%;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.auth-button:hover:not(:disabled),
+.auth-dev-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.12);
+}
+
+.auth-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.auth-button-google {
+  border: 1px solid #d4d4d8;
+  background: #fff;
+  color: #27272a;
+}
+
+.auth-button-google span {
+  color: #4285f4;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.auth-button-facebook {
+  border: 1px solid #1877f2;
+  background: #1877f2;
+  color: #fff;
+}
+
+.auth-button-facebook span {
+  font-family: Arial, sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 20px 0 12px;
+  color: #a1a1aa;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  height: 1px;
+  flex: 1;
+  background: #e4e4e7;
+  content: "";
+}
+
+.auth-dev-button {
+  border: 1px dashed #a1a1aa;
+  background: #fafafa;
+  color: #52525b;
+}
+
+.auth-error {
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.signed-in-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: #71717a;
+  font-size: 10px;
+}
+
+.signed-in-row button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #52525b;
+  cursor: pointer;
+  font-size: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
 @keyframes cardEntrance {
   from {
     opacity: 0;
