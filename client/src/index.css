@@ -632,6 +632,16 @@ select {
   text-decoration: underline;
 }
 
+.account-session-error {
+  margin: -4px 0 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 @keyframes cardEntrance {
   from {
     opacity: 0;

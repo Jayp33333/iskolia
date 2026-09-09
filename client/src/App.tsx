@@ -1406,6 +1406,7 @@ function useMultiplayer(authToken: string | null) {
   const [players, setPlayers] = useState<Map<string, PlayerState>>(new Map());
   const [ownId, setOwnId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatBubbles, setChatBubbles] = useState<
     Map<string, { text: string; expiresAt: number }>
@@ -1423,7 +1424,14 @@ function useMultiplayer(authToken: string | null) {
     }) as MultiplayerSocket;
     socketRef.current = socket;
 
-    socket.on("connect", () => setConnected(true));
+    socket.on("connect", () => {
+      setConnected(true);
+      setConnectionError(null);
+    });
+    socket.on("connect_error", (error) => {
+      setConnected(false);
+      setConnectionError(error.message || "Unable to join the campus.");
+    });
     socket.on("disconnect", () => {
       setConnected(false);
       setOwnId(null);
@@ -1521,6 +1529,7 @@ function useMultiplayer(authToken: string | null) {
 
   return {
     connected,
+    connectionError,
     ownId,
     players,
     messages,
@@ -1602,6 +1611,7 @@ function StartIntroScreen({
   onSignOut,
   onlineCount,
   isConnected,
+  connectionError,
 }: {
   character: CharacterChoice;
   name: string;
@@ -1612,6 +1622,7 @@ function StartIntroScreen({
   onSignOut: () => void;
   onlineCount: number;
   isConnected: boolean;
+  connectionError: string | null;
 }) {
   return (
     <div className="start-intro-overlay">
@@ -1733,12 +1744,16 @@ function StartIntroScreen({
             </span>
           </div>
         </div>
+        {connectionError && (
+          <p className="account-session-error" role="alert">{connectionError}</p>
+        )}
 
         {/* CTA ENTER BUTTON */}
         <button
           type="button"
           className="btn-enter-world btn-enter-campus-glow"
           onClick={onEnter}
+          disabled={!isConnected}
         >
           <span>Enter Campus</span>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -2675,7 +2690,7 @@ export default function App() {
   }, [multiplayer.connected]);
 
   const handleEnterCampus = () => {
-    if (!authUser) return;
+    if (!authUser || !multiplayer.connected) return;
     const finalName = playerName.trim() || (character === "iska" ? "Iska" : "Isko");
     const finalLoc = playerLocation.trim();
     setPlayerName(finalName);
@@ -2834,6 +2849,7 @@ export default function App() {
             onSignOut={handleSignOut}
             onlineCount={multiplayer.players.size}
             isConnected={multiplayer.connected}
+            connectionError={multiplayer.connectionError}
           />
         ) : (
           <SignInScreen

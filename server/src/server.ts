@@ -64,7 +64,7 @@ const userSchema = new Schema<StoredUser>(
     provider: { type: String, enum: ["google", "facebook", "development"], required: true },
     providerUserId: { type: String, required: true },
     name: { type: String, required: true, maxlength: 100 },
-    email: { type: String, lowercase: true, trim: true, maxlength: 320 },
+    email: { type: String, lowercase: true, trim: true, maxlength: 320, unique: true, sparse: true },
     picture: { type: String, maxlength: 2048 },
     firstSignInAt: { type: Date, required: true },
     lastSignInAt: { type: Date, required: true },
@@ -96,13 +96,17 @@ function isAdmin(user: AuthUser) {
   return Boolean(user.email && ADMIN_EMAILS.has(user.email.toLowerCase()));
 }
 
+function accountKey(user: AuthUser) {
+  return user.email?.trim().toLowerCase() || `${user.provider}:${user.id}`;
+}
+
 async function saveSignedInUser(user: AuthUser) {
   if (!databaseReady || user.provider === "development") return;
 
   try {
     const now = new Date();
     await User.findOneAndUpdate(
-      { provider: user.provider, providerUserId: user.id },
+      user.email ? { email: user.email.trim().toLowerCase() } : { provider: user.provider, providerUserId: user.id },
       {
         $set: {
           name: user.name.trim().slice(0, 100),
@@ -274,8 +278,16 @@ app.get("/auth/:provider/callback", async (req, res) => {
       const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
         headers: { Authorization: `Bearer ${token.access_token}` },
       });
-      const profile = (await profileResponse.json()) as { sub?: string; name?: string; email?: string; picture?: string };
-      if (!profileResponse.ok || !profile.sub || !profile.name) throw new Error("Google profile is incomplete");
+      const profile = (await profileResponse.json()) as {
+        sub?: string;
+        name?: string;
+        email?: string;
+        email_verified?: boolean;
+        picture?: string;
+      };
+      if (!profileResponse.ok || !profile.sub || !profile.name || !profile.email || profile.email_verified === false) {
+        throw new Error("Google profile is missing a verified email address");
+      }
       user = { id: profile.sub, name: profile.name, email: profile.email, picture: profile.picture, provider };
     } else {
       const tokenUrl = new URL("https://graph.facebook.com/oauth/access_token");
@@ -446,6 +458,7 @@ export interface ChatMessage {
 }
 
 const chatHistory: ChatMessage[] = [];
+const activeAccountSockets = new Map<string, string>();
 
 io.use((socket, next) => {
   const user = readToken(socket.handshake.auth?.token);
@@ -453,12 +466,20 @@ io.use((socket, next) => {
     next(new Error("Authentication required"));
     return;
   }
+  const key = accountKey(user);
+  if (activeAccountSockets.has(key)) {
+    next(new Error("This account is already active on another device."));
+    return;
+  }
   socket.data.user = user;
+  socket.data.accountKey = key;
   next();
 });
 
 io.on("connection", (socket: Socket) => {
   const user = socket.data.user as AuthUser;
+  const userAccountKey = socket.data.accountKey as string;
+  activeAccountSockets.set(userAccountKey, socket.id);
   const shortId = socket.id.slice(0, 4).toUpperCase();
   const newPlayer: PlayerState = {
     id: socket.id,
@@ -625,6 +646,9 @@ io.on("connection", (socket: Socket) => {
   socket.on("disconnect", (reason) => {
     const player = players.get(socket.id);
     players.delete(socket.id);
+    if (activeAccountSockets.get(userAccountKey) === socket.id) {
+      activeAccountSockets.delete(userAccountKey);
+    }
     console.log(
       `[-] Player disconnected: ${socket.id} (${reason}) | Remaining: ${players.size}`
     );
