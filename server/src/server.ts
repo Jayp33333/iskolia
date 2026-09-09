@@ -211,7 +211,9 @@ function startOAuth(provider: "google" | "facebook", res: express.Response) {
       client_id: process.env.FACEBOOK_APP_ID!,
       redirect_uri: callbackUrl("facebook"),
       response_type: "code",
-      scope: "email,public_profile",
+      // `public_profile` is available to every Facebook Login app. Email is
+      // optional and some Meta app configurations reject it as an invalid scope.
+      scope: "public_profile",
       state,
     }).toString();
   }
