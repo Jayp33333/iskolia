@@ -10,6 +10,10 @@ dotenv.config();
 
 const PORT = Number(process.env.PORT) || 3001;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || CLIENT_URL)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 const PUBLIC_SERVER_URL = process.env.PUBLIC_SERVER_URL || `http://localhost:${PORT}`;
 const JWT_SECRET = process.env.JWT_SECRET;
 const isProduction = process.env.NODE_ENV === "production";
@@ -82,7 +86,7 @@ function clearOauthState(res: express.Response) {
 }
 
 const app = express();
-app.use(cors({ origin: CLIENT_URL }));
+app.use(cors({ origin: CORS_ORIGINS }));
 app.use(express.json());
 
 app.get("/auth/providers", (_req, res) => {
@@ -294,7 +298,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: CLIENT_URL,
+    origin: CORS_ORIGINS,
     methods: ["GET", "POST"],
   },
   pingInterval: 10000,
