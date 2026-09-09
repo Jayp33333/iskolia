@@ -59,6 +59,12 @@ interface StoredUser {
   signInCount: number;
 }
 
+interface SignInEvent {
+  provider: AuthProvider;
+  email?: string;
+  createdAt: Date;
+}
+
 const userSchema = new Schema<StoredUser>(
   {
     provider: { type: String, enum: ["google", "facebook", "development"], required: true },
@@ -76,6 +82,16 @@ userSchema.index({ provider: 1, providerUserId: 1 }, { unique: true });
 userSchema.index({ lastSignInAt: -1 });
 
 const User = mongoose.model<StoredUser>("User", userSchema);
+const signInEventSchema = new Schema<SignInEvent>(
+  {
+    provider: { type: String, enum: ["google", "facebook"], required: true },
+    email: { type: String, lowercase: true, trim: true, maxlength: 320 },
+    createdAt: { type: Date, required: true, default: Date.now },
+  },
+  { versionKey: false },
+);
+signInEventSchema.index({ createdAt: -1 });
+const SignInEvent = mongoose.model<SignInEvent>("SignInEvent", signInEventSchema);
 let databaseReady = false;
 
 async function connectDatabase() {
@@ -119,6 +135,11 @@ async function saveSignedInUser(user: AuthUser) {
       },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     ).exec();
+    await SignInEvent.create({
+      provider: user.provider,
+      email: user.email?.trim().toLowerCase(),
+      createdAt: now,
+    });
   } catch (error) {
     console.error("Could not save signed-in user.", error);
   }
@@ -364,7 +385,10 @@ app.get("/admin/dashboard", async (req, res) => {
 
   const requestedLimit = Number(req.query.limit);
   const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 50;
-  const [users, total, googleUsers, facebookUsers] = await Promise.all([
+  const activityStart = new Date();
+  activityStart.setUTCHours(0, 0, 0, 0);
+  activityStart.setUTCDate(activityStart.getUTCDate() - 6);
+  const [users, total, googleUsers, facebookUsers, dailyActivity] = await Promise.all([
     User.find({}, { providerUserId: 0 })
       .sort({ lastSignInAt: -1 })
       .limit(limit)
@@ -373,6 +397,11 @@ app.get("/admin/dashboard", async (req, res) => {
     User.countDocuments(),
     User.countDocuments({ provider: "google" }),
     User.countDocuments({ provider: "facebook" }),
+    SignInEvent.aggregate<{ _id: string; count: number }>([
+      { $match: { createdAt: { $gte: activityStart } } },
+      { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]),
   ]);
   const activeUsers = Array.from(players.values()).map((player) => {
     const socket = io.sockets.sockets.get(player.id);
@@ -391,6 +420,7 @@ app.get("/admin/dashboard", async (req, res) => {
     facebookUsers,
     activePlayers: activeUsers.length,
     activeUsers,
+    dailyActivity,
     users,
   });
 });

@@ -100,6 +100,7 @@ type AdminDashboardData = {
   activePlayers: number;
   activeUsers: ActiveUser[];
   users: StoredUser[];
+  dailyActivity: Array<{ _id: string; count: number }>;
 };
 
 const AUTH_TOKEN_KEY = "iskolia_auth_token";
@@ -1899,10 +1900,16 @@ function EditProfileModal({
   );
 }
 
+type AdminPage = "/admin" | "/admin/users" | "/admin/players" | "/admin/access";
+
 function AdminDashboard({ authToken, onSignOut }: { authToken: string; onSignOut: () => void }) {
   const [data, setData] = useState<AdminDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState<AdminPage>(() => {
+    const path = window.location.pathname as AdminPage;
+    return ["/admin", "/admin/users", "/admin/players", "/admin/access"].includes(path) ? path : "/admin";
+  });
 
   const loadDashboard = () => {
     setLoading(true);
@@ -1923,19 +1930,56 @@ function AdminDashboard({ authToken, onSignOut }: { authToken: string; onSignOut
 
   useEffect(() => {
     loadDashboard();
+    const updatePage = () => {
+      const path = window.location.pathname as AdminPage;
+      setPage(["/admin", "/admin/users", "/admin/players", "/admin/access"].includes(path) ? path : "/admin");
+    };
+    window.addEventListener("popstate", updatePage);
+    const refreshId = window.setInterval(loadDashboard, 20_000);
+    return () => {
+      window.removeEventListener("popstate", updatePage);
+      window.clearInterval(refreshId);
+    };
   }, [authToken]);
 
+  const navigate = (nextPage: AdminPage) => {
+    window.history.pushState({}, "", nextPage);
+    setPage(nextPage);
+  };
+  const activityByDate = new Map(data?.dailyActivity.map((entry) => [entry._id, entry.count]) || []);
+  const activityDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setUTCHours(0, 0, 0, 0);
+    date.setUTCDate(date.getUTCDate() - (6 - index));
+    const key = date.toISOString().slice(0, 10);
+    return { key, label: date.toLocaleDateString(undefined, { weekday: "short" }), count: activityByDate.get(key) || 0 };
+  });
+  const peakActivity = Math.max(1, ...activityDays.map((day) => day.count));
+  const graphPoints = activityDays.map((day, index) => `${(index / 6) * 100},${92 - (day.count / peakActivity) * 74}`).join(" ");
+
+  const pageTitle = page === "/admin" ? "Overview" : page === "/admin/users" ? "Users" : page === "/admin/players" ? "Live players" : "Access";
+
   return (
-    <main className="admin-dashboard-page">
+    <div className="admin-shell">
+      <aside className="admin-sidebar">
+        <button type="button" className="admin-brand" onClick={() => navigate("/admin")}>ISKOLIA <span>ADMIN</span></button>
+        <nav aria-label="Admin navigation">
+          <button type="button" className={page === "/admin" ? "is-active" : ""} onClick={() => navigate("/admin")}>Overview</button>
+          <button type="button" className={page === "/admin/users" ? "is-active" : ""} onClick={() => navigate("/admin/users")}>Users</button>
+          <button type="button" className={page === "/admin/players" ? "is-active" : ""} onClick={() => navigate("/admin/players")}>Live players</button>
+          <button type="button" className={page === "/admin/access" ? "is-active" : ""} onClick={() => navigate("/admin/access")}>Access</button>
+        </nav>
+        <button type="button" className="admin-sidebar-signout" onClick={onSignOut}>Sign out</button>
+      </aside>
+      <main className="admin-dashboard-page">
       <header className="admin-dashboard-header">
         <div>
           <span className="admin-eyebrow">ISKOLIA</span>
-          <h1>Admin dashboard</h1>
-          <p>Registered accounts and live campus activity.</p>
+          <h1>{pageTitle}</h1>
+          <p>{page === "/admin" ? "A live view of your Iskolia community." : "Manage your Iskolia community."}</p>
         </div>
         <div className="admin-header-actions">
-          <button type="button" className="admin-refresh-button" onClick={loadDashboard}>Refresh</button>
-          <button type="button" className="admin-sign-out-button" onClick={onSignOut}>Sign out</button>
+          <button type="button" className="admin-refresh-button" onClick={loadDashboard}>Refresh data</button>
         </div>
       </header>
 
@@ -1943,11 +1987,17 @@ function AdminDashboard({ authToken, onSignOut }: { authToken: string; onSignOut
         <section className="admin-state admin-state-error"><strong>Could not load the dashboard.</strong><span>{error}</span></section>
       ) : data && (
         <>
+          {page === "/admin" && <>
           <section className="admin-stat-grid" aria-label="Account statistics">
             <article><span>Registered users</span><strong>{data.totalUsers}</strong></article>
             <article><span>Active in campus</span><strong>{data.activePlayers}</strong></article>
             <article><span>Google accounts</span><strong>{data.googleUsers}</strong></article>
             <article><span>Facebook accounts</span><strong>{data.facebookUsers}</strong></article>
+          </section>
+
+          <section className="admin-dashboard-panel admin-activity-panel">
+            <div className="admin-panel-heading"><div><h2>Sign-in activity</h2><p>Successful logins during the last seven days.</p></div><span>7 days</span></div>
+            <div className="admin-chart"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Seven-day sign-in activity"><line x1="0" x2="100" y1="92" y2="92" /><polyline points={graphPoints} /></svg><div className="admin-chart-labels">{activityDays.map((day) => <span key={day.key}>{day.label}<b>{day.count}</b></span>)}</div></div>
           </section>
 
           <section className="admin-dashboard-panel">
@@ -1958,18 +2008,28 @@ function AdminDashboard({ authToken, onSignOut }: { authToken: string; onSignOut
               </div>
             )}
           </section>
+          </>}
 
-          <section className="admin-dashboard-panel">
-            <div className="admin-panel-heading"><div><h2>Registered users</h2><p>Most recently signed-in 100 users.</p></div><span>{data.totalUsers} total</span></div>
+          {page === "/admin/users" && <section className="admin-dashboard-panel">
+            <div className="admin-panel-heading"><div><h2>Registered users</h2><p>Most recently signed-in 100 accounts.</p></div><span>{data.totalUsers} total</span></div>
             <div className="admin-user-table-wrap">
               <table className="admin-user-table"><thead><tr><th>User</th><th>Provider</th><th>Sign-ins</th><th>Last sign-in</th></tr></thead><tbody>
                 {data.users.map((user) => <tr key={user._id}><td><div className="admin-table-user">{user.picture ? <img src={user.picture} alt="" referrerPolicy="no-referrer" /> : <span className="admin-user-avatar">{user.name.slice(0, 1).toUpperCase()}</span>}<div><strong>{user.name}</strong><span>{user.email || "No email shared"}</span></div></div></td><td><span className={`admin-provider admin-provider-${user.provider}`}>{user.provider}</span></td><td>{user.signInCount}</td><td><time dateTime={user.lastSignInAt}>{new Date(user.lastSignInAt).toLocaleString()}</time></td></tr>)}
               </tbody></table>
             </div>
-          </section>
+          </section>}
+
+          {page === "/admin/players" && <section className="admin-dashboard-panel">
+            <div className="admin-panel-heading"><div><h2>Live players</h2><p>Current players connected to the campus. Refreshes every 20 seconds.</p></div><span className="admin-live-pill"><i /> {data.activePlayers} live</span></div>
+            {data.activeUsers.length === 0 ? <p className="admin-empty">Nobody is in the campus right now.</p> : <div className="admin-active-list">{data.activeUsers.map((user) => <article key={user.id} className="admin-active-row"><span className="admin-user-avatar">{user.name.slice(0, 1).toUpperCase()}</span><div><strong>{user.name}</strong><span>{user.email || "No email shared"}</span></div><span className={`admin-provider admin-provider-${user.provider}`}>{user.provider}</span></article>)}</div>}
+          </section>}
+
+          {page === "/admin/access" && <section className="admin-dashboard-panel admin-access-panel"><h2>Administrator access</h2><p>Dashboard access is controlled by the server using the <code>ADMIN_EMAILS</code> environment variable. Add allowed emails in Render, separated by commas, then sign in again.</p><p>Opening an admin URL never grants permissions by itself; the API validates the signed-in account on every request.</p></section>}
+
         </>
       )}
-    </main>
+      </main>
+    </div>
   );
 }
 
@@ -2535,7 +2595,9 @@ export default function App() {
     setAuthToken(token);
     setAuthUser(user);
     setIsAdmin(hasAdminAccess);
-    if (hasAdminAccess) window.location.hash = "/admin";
+    if (hasAdminAccess && window.location.pathname !== "/admin") {
+      window.history.replaceState({}, "", "/admin");
+    }
     setPlayerName(user.name.trim().slice(0, 20) || "Student");
     setAuthError(null);
   };
@@ -2629,13 +2691,13 @@ export default function App() {
     setAuthToken(null);
     setAuthUser(null);
     setIsAdmin(false);
-    window.location.hash = "";
+    window.history.replaceState({}, "", "/");
     setGamePhase("intro");
   };
 
   useEffect(() => {
-    if (isAdmin && window.location.hash !== "#/admin") {
-      window.location.hash = "/admin";
+    if (isAdmin && !window.location.pathname.startsWith("/admin")) {
+      window.history.replaceState({}, "", "/admin");
     }
   }, [isAdmin]);
 
