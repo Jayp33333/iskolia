@@ -351,7 +351,7 @@ app.get("/auth/me", (req, res) => {
   res.json({ user, isAdmin: isAdmin(user) });
 });
 
-app.get("/admin/users", async (req, res) => {
+app.get("/admin/dashboard", async (req, res) => {
   const user = readToken(req.headers.authorization?.replace(/^Bearer\s+/i, ""));
   if (!user || !isAdmin(user)) {
     res.status(403).json({ error: "Administrator access is required." });
@@ -364,15 +364,35 @@ app.get("/admin/users", async (req, res) => {
 
   const requestedLimit = Number(req.query.limit);
   const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 50;
-  const [users, total] = await Promise.all([
+  const [users, total, googleUsers, facebookUsers] = await Promise.all([
     User.find({}, { providerUserId: 0 })
       .sort({ lastSignInAt: -1 })
       .limit(limit)
       .lean()
       .exec(),
     User.countDocuments(),
+    User.countDocuments({ provider: "google" }),
+    User.countDocuments({ provider: "facebook" }),
   ]);
-  res.json({ total, users });
+  const activeUsers = Array.from(players.values()).map((player) => {
+    const socket = io.sockets.sockets.get(player.id);
+    const activeUser = socket?.data.user as AuthUser | undefined;
+    return {
+      id: player.id,
+      name: player.name,
+      provider: activeUser?.provider || "unknown",
+      email: activeUser?.email,
+      connectedAt: socket?.handshake.issued || new Date().toISOString(),
+    };
+  });
+  res.json({
+    totalUsers: total,
+    googleUsers,
+    facebookUsers,
+    activePlayers: activeUsers.length,
+    activeUsers,
+    users,
+  });
 });
 
 app.post("/auth/development", (_req, res) => {

@@ -85,6 +85,23 @@ type StoredUser = {
   signInCount: number;
 };
 
+type ActiveUser = {
+  id: string;
+  name: string;
+  email?: string;
+  provider: "google" | "facebook" | "development" | "unknown";
+  connectedAt: string;
+};
+
+type AdminDashboardData = {
+  totalUsers: number;
+  googleUsers: number;
+  facebookUsers: number;
+  activePlayers: number;
+  activeUsers: ActiveUser[];
+  users: StoredUser[];
+};
+
 const AUTH_TOKEN_KEY = "iskolia_auth_token";
 
 function getServerUrl() {
@@ -1882,83 +1899,77 @@ function EditProfileModal({
   );
 }
 
-function AdminUsersModal({
-  isOpen,
-  authToken,
-  onClose,
-}: {
-  isOpen: boolean;
-  authToken: string | null;
-  onClose: () => void;
-}) {
-  const [users, setUsers] = useState<StoredUser[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+function AdminDashboard({ authToken, onSignOut }: { authToken: string; onSignOut: () => void }) {
+  const [data, setData] = useState<AdminDashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!isOpen || !authToken) return;
-    let cancelled = false;
+  const loadDashboard = () => {
     setLoading(true);
     setError(null);
-    fetch(`${getServerUrl()}/admin/users?limit=100`, {
+    fetch(`${getServerUrl()}/admin/dashboard?limit=100`, {
       headers: { Authorization: `Bearer ${authToken}` },
     })
       .then(async (response) => {
-        const result = (await response.json()) as { users?: StoredUser[]; total?: number; error?: string };
-        if (!response.ok) throw new Error(result.error || "Could not load users.");
-        if (!cancelled) {
-          setUsers(result.users || []);
-          setTotal(result.total || 0);
-        }
+        const result = (await response.json()) as Partial<AdminDashboardData> & { error?: string };
+        if (!response.ok) throw new Error(result.error || "Could not load the dashboard.");
+        setData(result as AdminDashboardData);
       })
       .catch((requestError: unknown) => {
-        if (!cancelled) setError(requestError instanceof Error ? requestError.message : "Could not load users.");
+        setError(requestError instanceof Error ? requestError.message : "Could not load the dashboard.");
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, authToken]);
+      .finally(() => setLoading(false));
+  };
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    loadDashboard();
+  }, [authToken]);
 
   return (
-    <div className="char-modal-backdrop" onClick={onClose}>
-      <section className="admin-users-modal" onClick={(event) => event.stopPropagation()} aria-label="Registered users">
-        <div className="char-modal-header-row">
-          <div>
-            <h2 className="char-modal-title">Registered users</h2>
-            <p className="admin-users-count">{total} total · newest sign-ins first</p>
-          </div>
-          <button type="button" className="modal-close-btn" onClick={onClose} aria-label="Close users list">×</button>
+    <main className="admin-dashboard-page">
+      <header className="admin-dashboard-header">
+        <div>
+          <span className="admin-eyebrow">ISKOLIA</span>
+          <h1>Admin dashboard</h1>
+          <p>Registered accounts and live campus activity.</p>
         </div>
-        {loading ? <p className="admin-users-empty">Loading users…</p> : error ? (
-          <p className="admin-users-error">{error}</p>
-        ) : users.length === 0 ? (
-          <p className="admin-users-empty">No Google or Facebook sign-ins have been saved yet.</p>
-        ) : (
-          <div className="admin-users-list">
-            {users.map((user) => (
-              <article className="admin-user-row" key={user._id}>
-                {user.picture ? <img src={user.picture} alt="" referrerPolicy="no-referrer" /> : <span className="admin-user-avatar">{user.name.slice(0, 1).toUpperCase()}</span>}
-                <div className="admin-user-details">
-                  <strong>{user.name}</strong>
-                  <span>{user.email || "No email shared"}</span>
-                </div>
-                <div className="admin-user-meta">
-                  <span className={`admin-provider admin-provider-${user.provider}`}>{user.provider}</span>
-                  <span>{user.signInCount} sign-in{user.signInCount === 1 ? "" : "s"}</span>
-                  <time dateTime={user.lastSignInAt}>Last: {new Date(user.lastSignInAt).toLocaleDateString()}</time>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
+        <div className="admin-header-actions">
+          <button type="button" className="admin-refresh-button" onClick={loadDashboard}>Refresh</button>
+          <button type="button" className="admin-sign-out-button" onClick={onSignOut}>Sign out</button>
+        </div>
+      </header>
+
+      {loading && !data ? <p className="admin-state">Loading dashboard…</p> : error ? (
+        <section className="admin-state admin-state-error"><strong>Could not load the dashboard.</strong><span>{error}</span></section>
+      ) : data && (
+        <>
+          <section className="admin-stat-grid" aria-label="Account statistics">
+            <article><span>Registered users</span><strong>{data.totalUsers}</strong></article>
+            <article><span>Active in campus</span><strong>{data.activePlayers}</strong></article>
+            <article><span>Google accounts</span><strong>{data.googleUsers}</strong></article>
+            <article><span>Facebook accounts</span><strong>{data.facebookUsers}</strong></article>
+          </section>
+
+          <section className="admin-dashboard-panel">
+            <div className="admin-panel-heading"><div><h2>Active players</h2><p>Players currently connected to the campus.</p></div><span className="admin-live-pill"><i /> {data.activePlayers} live</span></div>
+            {data.activeUsers.length === 0 ? <p className="admin-empty">Nobody is in the campus right now.</p> : (
+              <div className="admin-active-list">
+                {data.activeUsers.map((user) => <article key={user.id} className="admin-active-row"><span className="admin-user-avatar">{user.name.slice(0, 1).toUpperCase()}</span><div><strong>{user.name}</strong><span>{user.email || "No email shared"}</span></div><span className={`admin-provider admin-provider-${user.provider}`}>{user.provider}</span></article>)}
+              </div>
+            )}
+          </section>
+
+          <section className="admin-dashboard-panel">
+            <div className="admin-panel-heading"><div><h2>Registered users</h2><p>Most recently signed-in 100 users.</p></div><span>{data.totalUsers} total</span></div>
+            <div className="admin-user-table-wrap">
+              <table className="admin-user-table"><thead><tr><th>User</th><th>Provider</th><th>Sign-ins</th><th>Last sign-in</th></tr></thead><tbody>
+                {data.users.map((user) => <tr key={user._id}><td><div className="admin-table-user">{user.picture ? <img src={user.picture} alt="" referrerPolicy="no-referrer" /> : <span className="admin-user-avatar">{user.name.slice(0, 1).toUpperCase()}</span>}<div><strong>{user.name}</strong><span>{user.email || "No email shared"}</span></div></div></td><td><span className={`admin-provider admin-provider-${user.provider}`}>{user.provider}</span></td><td>{user.signInCount}</td><td><time dateTime={user.lastSignInAt}>{new Date(user.lastSignInAt).toLocaleString()}</time></td></tr>)}
+              </tbody></table>
+            </div>
+          </section>
+        </>
+      )}
+    </main>
   );
 }
 
@@ -2498,7 +2509,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authProviders, setAuthProviders] = useState<AuthProviders | null>(null);
   const authRequestRef = useRef(false);
-  const multiplayer = useMultiplayer(authToken);
+  const multiplayer = useMultiplayer(isAdmin ? null : authToken);
 
   const [character, setCharacter] = useState<CharacterChoice>(() => {
     const saved = localStorage.getItem("iskolia_character");
@@ -2515,7 +2526,6 @@ export default function App() {
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("intro");
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
-  const [isAdminUsersOpen, setIsAdminUsersOpen] = useState(false);
   const [playerNotice, setPlayerNotice] = useState<string | null>(null);
   const previousPlayersRef = useRef<Map<string, PlayerState> | null>(null);
   const playerNoticeTimeoutRef = useRef<number | null>(null);
@@ -2525,6 +2535,7 @@ export default function App() {
     setAuthToken(token);
     setAuthUser(user);
     setIsAdmin(hasAdminAccess);
+    if (hasAdminAccess) window.location.hash = "/admin";
     setPlayerName(user.name.trim().slice(0, 20) || "Student");
     setAuthError(null);
   };
@@ -2618,9 +2629,15 @@ export default function App() {
     setAuthToken(null);
     setAuthUser(null);
     setIsAdmin(false);
-    setIsAdminUsersOpen(false);
+    window.location.hash = "";
     setGamePhase("intro");
   };
+
+  useEffect(() => {
+    if (isAdmin && window.location.hash !== "#/admin") {
+      window.location.hash = "/admin";
+    }
+  }, [isAdmin]);
 
   useEffect(() => {
     const previousPlayers = previousPlayersRef.current;
@@ -2753,6 +2770,10 @@ export default function App() {
   }, [character, playerName, playerLocation, gamePhase, isEditModalOpen]);
 
   const ownChatBubble = multiplayer.chatBubbles.get(multiplayer.ownId || "")?.text;
+
+  if (!authLoading && isAdmin && authToken) {
+    return <AdminDashboard authToken={authToken} onSignOut={handleSignOut} />;
+  }
 
   return (
     <div
@@ -2921,22 +2942,6 @@ export default function App() {
               </svg>
             </button>
 
-            {isAdmin && (
-              <button
-                type="button"
-                className="hud-btn"
-                onClick={() => setIsAdminUsersOpen(true)}
-                title="View registered users"
-                aria-label="View registered users"
-              >
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-                </svg>
-              </button>
-            )}
-
           </div>
 
           {/* CAMPUS CHAT BOX */}
@@ -2962,11 +2967,6 @@ export default function App() {
             onSave={handleSaveProfile}
           />
 
-          <AdminUsersModal
-            isOpen={isAdminUsersOpen}
-            authToken={authToken}
-            onClose={() => setIsAdminUsersOpen(false)}
-          />
         </>
       )}
     </div>
