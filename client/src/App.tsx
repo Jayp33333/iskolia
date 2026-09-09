@@ -74,6 +74,17 @@ type AuthProviders = {
   development: boolean;
 };
 
+type StoredUser = {
+  _id: string;
+  provider: "google" | "facebook";
+  name: string;
+  email?: string;
+  picture?: string;
+  firstSignInAt: string;
+  lastSignInAt: string;
+  signInCount: number;
+};
+
 const AUTH_TOKEN_KEY = "iskolia_auth_token";
 
 function getServerUrl() {
@@ -1856,6 +1867,86 @@ function EditProfileModal({
   );
 }
 
+function AdminUsersModal({
+  isOpen,
+  authToken,
+  onClose,
+}: {
+  isOpen: boolean;
+  authToken: string | null;
+  onClose: () => void;
+}) {
+  const [users, setUsers] = useState<StoredUser[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !authToken) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetch(`${getServerUrl()}/admin/users?limit=100`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    })
+      .then(async (response) => {
+        const result = (await response.json()) as { users?: StoredUser[]; total?: number; error?: string };
+        if (!response.ok) throw new Error(result.error || "Could not load users.");
+        if (!cancelled) {
+          setUsers(result.users || []);
+          setTotal(result.total || 0);
+        }
+      })
+      .catch((requestError: unknown) => {
+        if (!cancelled) setError(requestError instanceof Error ? requestError.message : "Could not load users.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, authToken]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="char-modal-backdrop" onClick={onClose}>
+      <section className="admin-users-modal" onClick={(event) => event.stopPropagation()} aria-label="Registered users">
+        <div className="char-modal-header-row">
+          <div>
+            <h2 className="char-modal-title">Registered users</h2>
+            <p className="admin-users-count">{total} total · newest sign-ins first</p>
+          </div>
+          <button type="button" className="modal-close-btn" onClick={onClose} aria-label="Close users list">×</button>
+        </div>
+        {loading ? <p className="admin-users-empty">Loading users…</p> : error ? (
+          <p className="admin-users-error">{error}</p>
+        ) : users.length === 0 ? (
+          <p className="admin-users-empty">No Google or Facebook sign-ins have been saved yet.</p>
+        ) : (
+          <div className="admin-users-list">
+            {users.map((user) => (
+              <article className="admin-user-row" key={user._id}>
+                {user.picture ? <img src={user.picture} alt="" referrerPolicy="no-referrer" /> : <span className="admin-user-avatar">{user.name.slice(0, 1).toUpperCase()}</span>}
+                <div className="admin-user-details">
+                  <strong>{user.name}</strong>
+                  <span>{user.email || "No email shared"}</span>
+                </div>
+                <div className="admin-user-meta">
+                  <span className={`admin-provider admin-provider-${user.provider}`}>{user.provider}</span>
+                  <span>{user.signInCount} sign-in{user.signInCount === 1 ? "" : "s"}</span>
+                  <time dateTime={user.lastSignInAt}>Last: {new Date(user.lastSignInAt).toLocaleDateString()}</time>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 // ============================================================
 // CHAT BOX & AVATARS
 // ============================================================
@@ -2387,6 +2478,7 @@ export default function App() {
   const currentAnimation = useRef<AnimationName>("Idle");
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authProviders, setAuthProviders] = useState<AuthProviders | null>(null);
@@ -2408,14 +2500,16 @@ export default function App() {
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("intro");
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
+  const [isAdminUsersOpen, setIsAdminUsersOpen] = useState(false);
   const [playerNotice, setPlayerNotice] = useState<string | null>(null);
   const previousPlayersRef = useRef<Map<string, PlayerState> | null>(null);
   const playerNoticeTimeoutRef = useRef<number | null>(null);
 
-  const saveAuthenticatedSession = (token: string, user: AuthUser) => {
+  const saveAuthenticatedSession = (token: string, user: AuthUser, hasAdminAccess = false) => {
     localStorage.setItem(AUTH_TOKEN_KEY, token);
     setAuthToken(token);
     setAuthUser(user);
+    setIsAdmin(hasAdminAccess);
     setPlayerName(user.name.trim().slice(0, 20) || "Student");
     setAuthError(null);
   };
@@ -2447,11 +2541,11 @@ export default function App() {
         body: JSON.stringify({ code: authCode }),
       })
         .then(async (response) => {
-          const result = (await response.json()) as { token?: string; user?: AuthUser; error?: string };
+          const result = (await response.json()) as { token?: string; user?: AuthUser; isAdmin?: boolean; error?: string };
           if (!response.ok || !result.token || !result.user) {
             throw new Error(result.error || "Sign-in could not be completed.");
           }
-          saveAuthenticatedSession(result.token, result.user);
+          saveAuthenticatedSession(result.token, result.user, result.isAdmin);
         })
         .catch((error: unknown) => {
           setAuthError(error instanceof Error ? error.message : "Sign-in could not be completed.");
@@ -2467,10 +2561,11 @@ export default function App() {
     }
     fetch(`${serverUrl}/auth/me`, { headers: { Authorization: `Bearer ${savedToken}` } })
       .then(async (response) => {
-        const result = (await response.json()) as { user?: AuthUser };
+        const result = (await response.json()) as { user?: AuthUser; isAdmin?: boolean };
         if (!response.ok || !result.user) throw new Error("Session expired");
         setAuthToken(savedToken);
         setAuthUser(result.user);
+        setIsAdmin(Boolean(result.isAdmin));
       })
       .catch(() => localStorage.removeItem(AUTH_TOKEN_KEY))
       .finally(finish);
@@ -2493,11 +2588,11 @@ export default function App() {
     setAuthError(null);
     try {
       const response = await fetch(`${getServerUrl()}/auth/development`, { method: "POST" });
-      const result = (await response.json()) as { token?: string; user?: AuthUser; error?: string };
+      const result = (await response.json()) as { token?: string; user?: AuthUser; isAdmin?: boolean; error?: string };
       if (!response.ok || !result.token || !result.user) {
         throw new Error(result.error || "Development sign-in is unavailable.");
       }
-      saveAuthenticatedSession(result.token, result.user);
+      saveAuthenticatedSession(result.token, result.user, result.isAdmin);
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Development sign-in is unavailable.");
     }
@@ -2507,6 +2602,8 @@ export default function App() {
     localStorage.removeItem(AUTH_TOKEN_KEY);
     setAuthToken(null);
     setAuthUser(null);
+    setIsAdmin(false);
+    setIsAdminUsersOpen(false);
     setGamePhase("intro");
   };
 
@@ -2808,6 +2905,22 @@ export default function App() {
               </svg>
             </button>
 
+            {isAdmin && (
+              <button
+                type="button"
+                className="hud-btn"
+                onClick={() => setIsAdminUsersOpen(true)}
+                title="View registered users"
+                aria-label="View registered users"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+              </button>
+            )}
+
           </div>
 
           {/* CAMPUS CHAT BOX */}
@@ -2831,6 +2944,12 @@ export default function App() {
             initialName={playerName}
             onClose={() => setIsEditModalOpen(false)}
             onSave={handleSaveProfile}
+          />
+
+          <AdminUsersModal
+            isOpen={isAdminUsersOpen}
+            authToken={authToken}
+            onClose={() => setIsAdminUsersOpen(false)}
           />
         </>
       )}

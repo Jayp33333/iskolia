@@ -204,6 +204,135 @@ select {
   transform: translateY(0);
 }
 
+.admin-users-modal {
+  width: min(680px, calc(100vw - 32px));
+  max-height: min(680px, calc(100vh - 32px));
+  overflow: hidden;
+  padding: 24px;
+  border: 1px solid rgba(228, 228, 231, 0.95);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22);
+  color: #18181b;
+}
+
+.admin-users-count {
+  margin: 4px 0 0;
+  color: #71717a;
+  font-size: 11px;
+}
+
+.admin-users-list {
+  max-height: min(520px, calc(100vh - 180px));
+  margin-top: 18px;
+  overflow-y: auto;
+  border-top: 1px solid #e4e4e7;
+}
+
+.admin-user-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 2px;
+  border-bottom: 1px solid #f4f4f5;
+}
+
+.admin-user-row img,
+.admin-user-avatar {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 50%;
+}
+
+.admin-user-row img {
+  object-fit: cover;
+}
+
+.admin-user-avatar {
+  display: grid;
+  place-items: center;
+  background: #f4f4f5;
+  color: #52525b;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.admin-user-details {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.admin-user-details strong,
+.admin-user-details span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-user-details strong {
+  font-size: 13px;
+}
+
+.admin-user-details span,
+.admin-user-meta {
+  color: #71717a;
+  font-size: 11px;
+}
+
+.admin-user-meta {
+  display: flex;
+  min-width: 106px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  text-align: right;
+}
+
+.admin-provider {
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.admin-provider-google {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.admin-provider-facebook {
+  background: #eff6ff;
+  color: #1877f2;
+}
+
+.admin-users-empty,
+.admin-users-error {
+  margin: 28px 0 12px;
+  color: #71717a;
+  font-size: 13px;
+  text-align: center;
+}
+
+.admin-users-error {
+  color: #b91c1c;
+}
+
+@media (max-width: 520px) {
+  .admin-users-modal {
+    padding: 18px;
+  }
+
+  .admin-user-meta {
+    min-width: 78px;
+    font-size: 9px;
+  }
+}
+
 @media (max-width: 600px) {
   .hud-top-bar {
     gap: 8px;

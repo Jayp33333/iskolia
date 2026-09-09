@@ -4,6 +4,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import crypto from "node:crypto";
 import jwt, { type JwtPayload } from "jsonwebtoken";
+import mongoose, { Schema } from "mongoose";
 import { Server, Socket } from "socket.io";
 
 dotenv.config();
@@ -17,6 +18,13 @@ const CORS_ORIGINS = (process.env.CORS_ORIGINS || CLIENT_URL)
 const PUBLIC_SERVER_URL = process.env.PUBLIC_SERVER_URL || `http://localhost:${PORT}`;
 const JWT_SECRET = process.env.JWT_SECRET;
 const isProduction = process.env.NODE_ENV === "production";
+const MONGODB_URI = process.env.MONGODB_URI;
+const ADMIN_EMAILS = new Set(
+  (process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
+);
 
 if (isProduction && !JWT_SECRET) {
   throw new Error("JWT_SECRET must be set when NODE_ENV=production");
@@ -39,6 +47,78 @@ interface AuthTokenPayload extends JwtPayload {
 }
 
 const oauthCodes = new Map<string, { user: AuthUser; expiresAt: number }>();
+
+interface StoredUser {
+  provider: AuthProvider;
+  providerUserId: string;
+  name: string;
+  email?: string;
+  picture?: string;
+  firstSignInAt: Date;
+  lastSignInAt: Date;
+  signInCount: number;
+}
+
+const userSchema = new Schema<StoredUser>(
+  {
+    provider: { type: String, enum: ["google", "facebook", "development"], required: true },
+    providerUserId: { type: String, required: true },
+    name: { type: String, required: true, maxlength: 100 },
+    email: { type: String, lowercase: true, trim: true, maxlength: 320 },
+    picture: { type: String, maxlength: 2048 },
+    firstSignInAt: { type: Date, required: true },
+    lastSignInAt: { type: Date, required: true },
+    signInCount: { type: Number, required: true, default: 0 },
+  },
+  { versionKey: false },
+);
+userSchema.index({ provider: 1, providerUserId: 1 }, { unique: true });
+userSchema.index({ lastSignInAt: -1 });
+
+const User = mongoose.model<StoredUser>("User", userSchema);
+let databaseReady = false;
+
+async function connectDatabase() {
+  if (!MONGODB_URI) {
+    console.warn("MongoDB is not configured: signed-in users will not be saved.");
+    return;
+  }
+  try {
+    await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 10_000 });
+    databaseReady = true;
+    console.log("MongoDB connected: sign-in history is enabled.");
+  } catch (error) {
+    console.error("MongoDB connection failed: sign-in history is disabled.", error);
+  }
+}
+
+function isAdmin(user: AuthUser) {
+  return Boolean(user.email && ADMIN_EMAILS.has(user.email.toLowerCase()));
+}
+
+async function saveSignedInUser(user: AuthUser) {
+  if (!databaseReady || user.provider === "development") return;
+
+  try {
+    const now = new Date();
+    await User.findOneAndUpdate(
+      { provider: user.provider, providerUserId: user.id },
+      {
+        $set: {
+          name: user.name.trim().slice(0, 100),
+          email: user.email?.trim().toLowerCase(),
+          picture: user.picture?.trim(),
+          lastSignInAt: now,
+        },
+        $setOnInsert: { firstSignInAt: now },
+        $inc: { signInCount: 1 },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    ).exec();
+  } catch (error) {
+    console.error("Could not save signed-in user.", error);
+  }
+}
 
 function providerIsConfigured(provider: "google" | "facebook") {
   return provider === "google"
@@ -214,6 +294,7 @@ app.get("/auth/:provider/callback", async (req, res) => {
       user = { id: profile.id, name: profile.name, email: profile.email, picture: profile.picture?.data?.url, provider };
     }
 
+    await saveSignedInUser(user);
     const authCode = crypto.randomBytes(32).toString("hex");
     oauthCodes.set(authCode, { user, expiresAt: Date.now() + 60_000 });
     redirectToClient(res, { auth_code: authCode });
@@ -231,7 +312,7 @@ app.post("/auth/exchange", (req, res) => {
     res.status(401).json({ error: "Your sign-in link has expired. Please try again." });
     return;
   }
-  res.json({ token: issueToken(pending.user), user: pending.user });
+  res.json({ token: issueToken(pending.user), user: pending.user, isAdmin: isAdmin(pending.user) });
 });
 
 app.get("/auth/me", (req, res) => {
@@ -240,7 +321,31 @@ app.get("/auth/me", (req, res) => {
     res.status(401).json({ error: "Session is invalid or expired." });
     return;
   }
-  res.json({ user });
+  res.json({ user, isAdmin: isAdmin(user) });
+});
+
+app.get("/admin/users", async (req, res) => {
+  const user = readToken(req.headers.authorization?.replace(/^Bearer\s+/i, ""));
+  if (!user || !isAdmin(user)) {
+    res.status(403).json({ error: "Administrator access is required." });
+    return;
+  }
+  if (!databaseReady) {
+    res.status(503).json({ error: "MongoDB is not connected. Set MONGODB_URI on the server." });
+    return;
+  }
+
+  const requestedLimit = Number(req.query.limit);
+  const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 50;
+  const [users, total] = await Promise.all([
+    User.find({}, { providerUserId: 0 })
+      .sort({ lastSignInAt: -1 })
+      .limit(limit)
+      .lean()
+      .exec(),
+    User.countDocuments(),
+  ]);
+  res.json({ total, users });
 });
 
 app.post("/auth/development", (_req, res) => {
@@ -526,6 +631,6 @@ io.on("connection", (socket: Socket) => {
   });
 });
 
-server.listen(PORT, () => {
+void connectDatabase().finally(() => server.listen(PORT, () => {
   console.log(`🚀 Multiplayer server running on http://localhost:${PORT}`);
-});
+}));
