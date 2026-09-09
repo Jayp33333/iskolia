@@ -148,11 +148,17 @@ app.get("/auth/:provider/callback", async (req, res) => {
     return;
   }
 
-  const stateCookie = req.headers.cookie
+  const encodedStateCookie = req.headers.cookie
     ?.split(";")
     .map((item) => item.trim())
     .find((item) => item.startsWith("iskolia_oauth_state="))
     ?.slice("iskolia_oauth_state=".length);
+  let stateCookie = "";
+  try {
+    stateCookie = encodedStateCookie ? decodeURIComponent(encodedStateCookie) : "";
+  } catch {
+    // A malformed cookie cannot be trusted and will fail the state check below.
+  }
   const state = typeof req.query.state === "string" ? req.query.state : "";
   clearOauthState(res);
 
